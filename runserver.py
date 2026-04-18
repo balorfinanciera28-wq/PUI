@@ -1,4 +1,8 @@
 from waitress import serve
-from appsi import app, PORT
+from appsi import app
 
-serve(app, host="localhost", port=PORT)
+print("🔥 APP CARGADA:", app)
+print("🔥 RUTAS:")
+print(app.url_map)
+
+serve(app, host="0.0.0.0", port=5000)

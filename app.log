@@ -226,9 +226,9 @@ AttributeError: 'Request' object has no attribute 'usuario_id'
 2026-03-31 10:43:35,046 [INFO] Token generado para PUI: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpbnN0aXR1Y2lvbl9pZCI6IlBVSSIsImV4cCI6MTc3NDk4MjYxNX0.I49L-Msfpm-gBiuM-aBQSFTZH1WREp9Ydiz-CbOTVOc
 2026-03-31 10:43:35,047 [INFO] Usuario PUI autenticado correctamente
 2026-03-31 10:43:35,050 [INFO] 127.0.0.1 - - [31/Mar/2026 10:43:35] "POST /login HTTP/1.1" 200 -
-2026-03-31 10:43:35,197 [INFO] 127.0.0.1 POST /activar-reporte-prueba - Body: {'codigo_postal': '06000', 'segundo_apellido': 'LOPEZ', 'numero': '123', 'municipio_o_alcaldia': 'CUAUHTÉMOC', 'calle': 'CALLE FICTICIA', 'fecha_nacimiento': '1990-01-01', 'direccion': 'CALLE FICTICIA 123, CENTRO', 'sexo_asignado': 'H', 'lugar_nacimiento': 'CDMX', 'primer_apellido': 'PEREZ', 'nombre': 'JUAN', 'formato_huellas': '', 'colonia': 'CENTRO', 'entidad_federativa': 'CDMX', 'correo': 'juan.perez@example.com', 'formato_fotos': '', 'id': 'A1B2C3D4E5F6-550e8400-e29b-41d4-a716-446655440000', 'huellas': {}, 'telefono': '5512345678', 'fecha_desaparicion': '2024-12-15', 'curp': 'TEST010101HDFABC01', 'fotos': []}
-2026-03-31 10:43:35,200 [INFO] JSON válido recibido: {'codigo_postal': '06000', 'segundo_apellido': 'LOPEZ', 'numero': '123', 'municipio_o_alcaldia': 'CUAUHTÉMOC', 'calle': 'CALLE FICTICIA', 'fecha_nacimiento': '1990-01-01', 'direccion': 'CALLE FICTICIA 123, CENTRO', 'sexo_asignado': 'H', 'lugar_nacimiento': 'CDMX', 'primer_apellido': 'PEREZ', 'nombre': 'JUAN', 'formato_huellas': '', 'colonia': 'CENTRO', 'entidad_federativa': 'CDMX', 'correo': 'juan.perez@example.com', 'formato_fotos': '', 'id': 'A1B2C3D4E5F6-550e8400-e29b-41d4-a716-446655440000', 'huellas': {}, 'telefono': '5512345678', 'fecha_desaparicion': '2024-12-15', 'curp': 'TEST010101HDFABC01', 'fotos': []}
-2026-03-31 10:43:35,201 [INFO] Usuario <Request 'http://www.balorfinanciera.com.mx/activar-reporte-prueba' [POST]> activando reporte (prueba): {'codigo_postal': '06000', 'segundo_apellido': 'LOPEZ', 'numero': '123', 'municipio_o_alcaldia': 'CUAUHTÉMOC', 'calle': 'CALLE FICTICIA', 'fecha_nacimiento': '1990-01-01', 'direccion': 'CALLE FICTICIA 123, CENTRO', 'sexo_asignado': 'H', 'lugar_nacimiento': 'CDMX', 'primer_apellido': 'PEREZ', 'nombre': 'JUAN', 'formato_huellas': '', 'colonia': 'CENTRO', 'entidad_federativa': 'CDMX', 'correo': 'juan.perez@example.com', 'formato_fotos': '', 'id': 'A1B2C3D4E5F6-550e8400-e29b-41d4-a716-446655440000', 'huellas': {}, 'telefono': '5512345678', 'fecha_desaparicion': '2024-12-15', 'curp': 'TEST010101HDFABC01', 'fotos': []}
+2026-03-31 10:43:35,197 [INFO] 127.0.0.1 POST /activar-reporte-prueba - Body: {'codigo_postal': '06000', 'segundo_apellido': 'LOPEZ', 'numero': '123', 'municipio_o_alcaldia': 'CUAUHTï¿½MOC', 'calle': 'CALLE FICTICIA', 'fecha_nacimiento': '1990-01-01', 'direccion': 'CALLE FICTICIA 123, CENTRO', 'sexo_asignado': 'H', 'lugar_nacimiento': 'CDMX', 'primer_apellido': 'PEREZ', 'nombre': 'JUAN', 'formato_huellas': '', 'colonia': 'CENTRO', 'entidad_federativa': 'CDMX', 'correo': 'juan.perez@example.com', 'formato_fotos': '', 'id': 'A1B2C3D4E5F6-550e8400-e29b-41d4-a716-446655440000', 'huellas': {}, 'telefono': '5512345678', 'fecha_desaparicion': '2024-12-15', 'curp': 'TEST010101HDFABC01', 'fotos': []}
+2026-03-31 10:43:35,200 [INFO] JSON vï¿½lido recibido: {'codigo_postal': '06000', 'segundo_apellido': 'LOPEZ', 'numero': '123', 'municipio_o_alcaldia': 'CUAUHTï¿½MOC', 'calle': 'CALLE FICTICIA', 'fecha_nacimiento': '1990-01-01', 'direccion': 'CALLE FICTICIA 123, CENTRO', 'sexo_asignado': 'H', 'lugar_nacimiento': 'CDMX', 'primer_apellido': 'PEREZ', 'nombre': 'JUAN', 'formato_huellas': '', 'colonia': 'CENTRO', 'entidad_federativa': 'CDMX', 'correo': 'juan.perez@example.com', 'formato_fotos': '', 'id': 'A1B2C3D4E5F6-550e8400-e29b-41d4-a716-446655440000', 'huellas': {}, 'telefono': '5512345678', 'fecha_desaparicion': '2024-12-15', 'curp': 'TEST010101HDFABC01', 'fotos': []}
+2026-03-31 10:43:35,201 [INFO] Usuario <Request 'http://www.balorfinanciera.com.mx/activar-reporte-prueba' [POST]> activando reporte (prueba): {'codigo_postal': '06000', 'segundo_apellido': 'LOPEZ', 'numero': '123', 'municipio_o_alcaldia': 'CUAUHTï¿½MOC', 'calle': 'CALLE FICTICIA', 'fecha_nacimiento': '1990-01-01', 'direccion': 'CALLE FICTICIA 123, CENTRO', 'sexo_asignado': 'H', 'lugar_nacimiento': 'CDMX', 'primer_apellido': 'PEREZ', 'nombre': 'JUAN', 'formato_huellas': '', 'colonia': 'CENTRO', 'entidad_federativa': 'CDMX', 'correo': 'juan.perez@example.com', 'formato_fotos': '', 'id': 'A1B2C3D4E5F6-550e8400-e29b-41d4-a716-446655440000', 'huellas': {}, 'telefono': '5512345678', 'fecha_desaparicion': '2024-12-15', 'curp': 'TEST010101HDFABC01', 'fotos': []}
 2026-03-31 10:43:35,204 [INFO] 127.0.0.1 - - [31/Mar/2026 10:43:35] "POST /activar-reporte-prueba HTTP/1.1" 200 -
 2026-03-31 10:45:53,279 [INFO] 127.0.0.1 GET / - Body: None
 2026-03-31 10:45:53,279 [INFO] 127.0.0.1 - - [31/Mar/2026 10:45:53] "[33mGET / HTTP/1.1[0m" 404 -
@@ -6882,7 +6882,7 @@ AttributeError: 'Request' object has no attribute 'usuario_id'
 2026-04-16 13:32:25,083 [INFO] 127.0.0.1 GET /.git/HEAD - Body: None
 2026-04-16 13:32:25,084 [INFO] 127.0.0.1 - - [16/Apr/2026 13:32:25] "[33mGET /.git/HEAD HTTP/1.1[0m" 404 -
 2026-04-16 13:35:55,371 [INFO] 127.0.0.1 POST /activar-reporte-prueba - Body: {'id': 'PRUEBA-0003-XYZ123456', 'curp': 'CALI660126HSLBPG09'}
-2026-04-16 13:35:55,376 [INFO] JSON válido recibido: {'id': 'PRUEBA-0003-XYZ123456', 'curp': 'CALI660126HSLBPG09'}
+2026-04-16 13:35:55,376 [INFO] JSON vï¿½lido recibido: {'id': 'PRUEBA-0003-XYZ123456', 'curp': 'CALI660126HSLBPG09'}
 2026-04-16 13:35:55,386 [INFO] Usuario <Request 'http://localhost:5000/activar-reporte-prueba' [POST]> activando reporte (prueba): {'id': 'PRUEBA-0003-XYZ123456', 'curp': 'CALI660126HSLBPG09'}
 2026-04-16 13:35:55,394 [INFO] 127.0.0.1 - - [16/Apr/2026 13:35:55] "POST /activar-reporte-prueba HTTP/1.1" 200 -
 2026-04-16 17:09:04,159 [INFO] 127.0.0.1 GET / - Body: None
@@ -7045,9 +7045,9 @@ AttributeError: 'Request' object has no attribute 'usuario_id'
 2026-04-17 08:33:41,968 [INFO] 127.0.0.1 - - [17/Apr/2026 08:33:41] "[33mGET /robots.txt HTTP/1.1[0m" 404 -
 2026-04-17 09:29:36,443 [INFO] 127.0.0.1 GET /robots.txt - Body: None
 2026-04-17 09:29:36,449 [INFO] 127.0.0.1 - - [17/Apr/2026 09:29:36] "[33mGET /robots.txt HTTP/1.1[0m" 404 -
-2026-04-17 09:52:45,986 [ERROR] 127.0.0.1 - - [17/Apr/2026 09:52:45] code 400, message Bad request version ('À\x13À')
+2026-04-17 09:52:45,986 [ERROR] 127.0.0.1 - - [17/Apr/2026 09:52:45] code 400, message Bad request version ('ï¿½\x13ï¿½')
 2026-04-17 09:52:56,236 [INFO] 127.0.0.1 POST /activar-reporte-prueba - Body: {'id': 'PRUEBA-0003-XYZ123456', 'curp': 'CALI660126HSLBPG09'}
-2026-04-17 09:52:56,238 [INFO] JSON válido recibido: {'id': 'PRUEBA-0003-XYZ123456', 'curp': 'CALI660126HSLBPG09'}
+2026-04-17 09:52:56,238 [INFO] JSON vï¿½lido recibido: {'id': 'PRUEBA-0003-XYZ123456', 'curp': 'CALI660126HSLBPG09'}
 2026-04-17 09:52:56,239 [INFO] Usuario <Request 'http://localhost:5000/activar-reporte-prueba' [POST]> activando reporte (prueba): {'id': 'PRUEBA-0003-XYZ123456', 'curp': 'CALI660126HSLBPG09'}
 2026-04-17 09:52:56,241 [INFO] 127.0.0.1 - - [17/Apr/2026 09:52:56] "POST /activar-reporte-prueba HTTP/1.1" 200 -
 2026-04-17 10:18:47,496 [INFO] 127.0.0.1 POST /reportes - Body: None
@@ -7059,7 +7059,7 @@ AttributeError: 'Request' object has no attribute 'usuario_id'
 2026-04-17 10:26:02,409 [INFO] ::1 POST /login - Body: {'usuario': 'PUI', 'clave': '***'}
 2026-04-17 10:27:11,993 [INFO] ::1 POST /activar-reporte-prueba - Body: {'id': '550e8400-e29b-41d4-a716-446655440000', 'curp': 'CALI660126HSLBPG09', 'nombre': 'IGNACIO', 'primer_apellido': 'CABRERA', 'segundo_apellido': 'LOPEZ'}
 2026-04-17 10:34:57,803 [INFO] 192.168.9.52 POST /activar-reporte-prueba - Body: {'codigo': '200', 'coincidencia': True, 'curp': 'CALI660126HSLBPG09', 'detalle': {'aval_id': '32E2F1BA-C767-459C-9984-D8CCC409798B', 'cliente_id': '1FAA69AC-5EA2-4526-A874-533403F99BB5', 'codigo_postal': '80054', 'correo': 'felipe_gastelum@hotmail.com', 'curp': 'CALI660126HSLBPG09', 'descripcion_lugar_evento': 'Registro institucional en CatAvales', 'direccion': 'Aquitania', 'empresa_id': 'FA764836-BB07-4EB3-9B30-2B69206174C2', 'fecha_evento': "b'\\x00\\x00", 'fecha_nacimiento': '1966-01-26', 'nombre': 'IGNACIO', 'nombre_completo': 'IGNACIO CABRERA  LOPEZ', 'numero': '2532', 'primer_apellido': 'CABRERA', 'razon_social': None, 'rfc': 'CALI660126JB5', 'segundo_apellido': 'LOPEZ', 'sexo_asignado': 'H', 'tipo_evento': 'REGISTRO ADMINISTRATIVO EN CATAVALES'}, 'error_sql': None, 'estatus': 'PRUEBA_COINCIDENCIA', 'fase': '1', 'id': '550e8400-e29b-41d4-a716-446655440000', 'mensaje': 'Reporte de prueba recibido correctamente'}
-2026-04-17 10:34:57,805 [INFO] JSON válido recibido: {'codigo': '200', 'coincidencia': True, 'curp': 'CALI660126HSLBPG09', 'detalle': {'aval_id': '32E2F1BA-C767-459C-9984-D8CCC409798B', 'cliente_id': '1FAA69AC-5EA2-4526-A874-533403F99BB5', 'codigo_postal': '80054', 'correo': 'felipe_gastelum@hotmail.com', 'curp': 'CALI660126HSLBPG09', 'descripcion_lugar_evento': 'Registro institucional en CatAvales', 'direccion': 'Aquitania', 'empresa_id': 'FA764836-BB07-4EB3-9B30-2B69206174C2', 'fecha_evento': "b'\\x00\\x00", 'fecha_nacimiento': '1966-01-26', 'nombre': 'IGNACIO', 'nombre_completo': 'IGNACIO CABRERA  LOPEZ', 'numero': '2532', 'primer_apellido': 'CABRERA', 'razon_social': None, 'rfc': 'CALI660126JB5', 'segundo_apellido': 'LOPEZ', 'sexo_asignado': 'H', 'tipo_evento': 'REGISTRO ADMINISTRATIVO EN CATAVALES'}, 'error_sql': None, 'estatus': 'PRUEBA_COINCIDENCIA', 'fase': '1', 'id': '550e8400-e29b-41d4-a716-446655440000', 'mensaje': 'Reporte de prueba recibido correctamente'}
+2026-04-17 10:34:57,805 [INFO] JSON vï¿½lido recibido: {'codigo': '200', 'coincidencia': True, 'curp': 'CALI660126HSLBPG09', 'detalle': {'aval_id': '32E2F1BA-C767-459C-9984-D8CCC409798B', 'cliente_id': '1FAA69AC-5EA2-4526-A874-533403F99BB5', 'codigo_postal': '80054', 'correo': 'felipe_gastelum@hotmail.com', 'curp': 'CALI660126HSLBPG09', 'descripcion_lugar_evento': 'Registro institucional en CatAvales', 'direccion': 'Aquitania', 'empresa_id': 'FA764836-BB07-4EB3-9B30-2B69206174C2', 'fecha_evento': "b'\\x00\\x00", 'fecha_nacimiento': '1966-01-26', 'nombre': 'IGNACIO', 'nombre_completo': 'IGNACIO CABRERA  LOPEZ', 'numero': '2532', 'primer_apellido': 'CABRERA', 'razon_social': None, 'rfc': 'CALI660126JB5', 'segundo_apellido': 'LOPEZ', 'sexo_asignado': 'H', 'tipo_evento': 'REGISTRO ADMINISTRATIVO EN CATAVALES'}, 'error_sql': None, 'estatus': 'PRUEBA_COINCIDENCIA', 'fase': '1', 'id': '550e8400-e29b-41d4-a716-446655440000', 'mensaje': 'Reporte de prueba recibido correctamente'}
 2026-04-17 10:34:57,808 [INFO] Usuario <Request 'http://192.168.10.40:5000/activar-reporte-prueba' [POST]> activando reporte (prueba): {'codigo': '200', 'coincidencia': True, 'curp': 'CALI660126HSLBPG09', 'detalle': {'aval_id': '32E2F1BA-C767-459C-9984-D8CCC409798B', 'cliente_id': '1FAA69AC-5EA2-4526-A874-533403F99BB5', 'codigo_postal': '80054', 'correo': 'felipe_gastelum@hotmail.com', 'curp': 'CALI660126HSLBPG09', 'descripcion_lugar_evento': 'Registro institucional en CatAvales', 'direccion': 'Aquitania', 'empresa_id': 'FA764836-BB07-4EB3-9B30-2B69206174C2', 'fecha_evento': "b'\\x00\\x00", 'fecha_nacimiento': '1966-01-26', 'nombre': 'IGNACIO', 'nombre_completo': 'IGNACIO CABRERA  LOPEZ', 'numero': '2532', 'primer_apellido': 'CABRERA', 'razon_social': None, 'rfc': 'CALI660126JB5', 'segundo_apellido': 'LOPEZ', 'sexo_asignado': 'H', 'tipo_evento': 'REGISTRO ADMINISTRATIVO EN CATAVALES'}, 'error_sql': None, 'estatus': 'PRUEBA_COINCIDENCIA', 'fase': '1', 'id': '550e8400-e29b-41d4-a716-446655440000', 'mensaje': 'Reporte de prueba recibido correctamente'}
 2026-04-17 10:34:57,809 [INFO] 192.168.9.52 - - [17/Apr/2026 10:34:57] "POST /activar-reporte-prueba HTTP/1.1" 200 -
 2026-04-17 10:45:00,477 [INFO] 127.0.0.1 POST /login - Body: {'institucion_id': 'institucion1', 'clave': '***'}
@@ -7074,3 +7074,141 @@ https://www.balorfinanciera.com.mx/activar-reporte-prueba - Body: {'id': '550e84
 2026-04-17 12:30:11,128 [INFO] 127.0.0.1 POST /login - Body: {'usuario': 'PUI', 'clave': '***'}
 2026-04-17 12:30:32,830 [INFO] 127.0.0.1 POST /activar-reporte-prueba - Body: {'id': '550e8400-e29b-41d4-a716-446655440000', 'curp': 'CALI660126HSLBPG09', 'nombre': 'IGNACIO', 'primer_apellido': 'CABRERA', 'segundo_apellido': 'LOPEZ'}
 2026-04-17 12:37:46,472 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-17 13:24:53,880 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-17 14:24:53,956 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-17 14:25:24,880 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-17 14:53:09,224 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-17 15:24:54,411 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-17 15:44:39,873 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-17 15:44:42,143 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-17 16:03:01,869 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-17 16:24:54,466 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-17 17:04:23,336 [INFO] 127.0.0.1 GET /.env - Body: None
+2026-04-17 17:18:33,533 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-17 17:24:54,524 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-17 18:21:52,915 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-17 18:24:54,584 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-17 19:11:13,257 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-17 19:14:42,630 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-17 19:14:47,833 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-17 19:16:12,832 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-17 19:24:54,646 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-17 19:27:09,899 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-17 20:05:31,695 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-17 20:11:46,472 [INFO] 127.0.0.1 HEAD / - Body: None
+2026-04-17 20:24:54,696 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-17 20:28:38,743 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-17 20:41:25,460 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-17 21:24:54,742 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-17 21:56:36,321 [INFO] 127.0.0.1 HEAD / - Body: None
+2026-04-17 21:56:37,575 [INFO] 127.0.0.1 HEAD / - Body: None
+2026-04-17 22:14:43,487 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-17 22:24:54,811 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-17 23:24:54,855 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-17 23:35:10,698 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-18 00:11:00,922 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-18 00:11:01,002 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-18 00:11:01,092 [INFO] 127.0.0.1 GET /wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:01,187 [INFO] 127.0.0.1 GET /xmlrpc.php - Body: None
+2026-04-18 00:11:01,263 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-18 00:11:01,341 [INFO] 127.0.0.1 GET /blog/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:01,418 [INFO] 127.0.0.1 GET /web/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:01,517 [INFO] 127.0.0.1 GET /wordpress/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:01,596 [INFO] 127.0.0.1 GET /website/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:01,693 [INFO] 127.0.0.1 GET /wp/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:01,780 [INFO] 127.0.0.1 GET /news/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:01,874 [INFO] 127.0.0.1 GET /2018/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:01,951 [INFO] 127.0.0.1 GET /2019/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:02,077 [INFO] 127.0.0.1 GET /shop/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:02,150 [INFO] 127.0.0.1 GET /wp1/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:02,225 [INFO] 127.0.0.1 GET /test/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:02,324 [INFO] 127.0.0.1 GET /media/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:02,425 [INFO] 127.0.0.1 GET /wp2/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:02,506 [INFO] 127.0.0.1 GET /site/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:02,602 [INFO] 127.0.0.1 GET /cms/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:11:02,681 [INFO] 127.0.0.1 GET /sito/wp-includes/wlwmanifest.xml - Body: None
+2026-04-18 00:24:54,903 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-18 00:36:08,811 [INFO] 127.0.0.1 GET /wp-login.php - Body: None
+2026-04-18 00:49:29,880 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-18 01:15:12,115 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-18 01:18:57,755 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-18 01:24:54,946 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-18 02:24:54,997 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-18 02:32:18,498 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-18 03:24:55,048 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-18 03:34:05,132 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-18 04:24:55,138 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-18 05:24:55,180 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-18 05:34:58,633 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-18 05:43:00,280 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-18 05:43:00,868 [INFO] 127.0.0.1 GET /.env - Body: None
+2026-04-18 05:43:01,448 [INFO] 127.0.0.1 GET /_profiler/phpinfo - Body: None
+2026-04-18 05:43:01,998 [INFO] 127.0.0.1 GET /_profiler/open - Body: None
+2026-04-18 06:24:55,223 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-18 06:37:01,855 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-18 07:24:55,268 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-18 07:47:22,741 [INFO] 127.0.0.1 GET /robots.txt - Body: None
+2026-04-18 08:14:26,408 [INFO] Hilo de fase 3 iniciado
+2026-04-18 08:14:26,585 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-18 08:24:55,336 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-18 08:37:34,879 [INFO] ::1 POST /activar-reporte-prueba - Body: {'id': '550e8400-e29b-41d4-a716-446655440000', 'curp': 'CALI660126HSLBPG09', 'nombre': 'IGNACIO', 'primer_apellido': 'CABRERA', 'segundo_apellido': 'LOPEZ'}
+2026-04-18 08:44:24,261 [INFO] ::1 POST /login - Body: {'usuario': 'PUI', 'clave': '***'}
+2026-04-18 08:44:55,729 [INFO] ::1 POST /activar-reporte-prueba - Body: {'id': '550e8400-e29b-41d4-a716-446655440000', 'curp': 'CALI660126HSLBPG09', 'nombre': 'IGNACIO', 'primer_apellido': 'CABRERA', 'segundo_apellido': 'LOPEZ'}
+2026-04-18 08:57:39,297 [INFO] 127.0.0.1 GET /wp-login.php - Body: None
+2026-04-18 09:02:47,671 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-18 09:02:47,672 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-18 09:02:47,675 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-18 09:02:48,224 [INFO] 127.0.0.1 GET /.git/HEAD - Body: None
+2026-04-18 09:15:18,677 [INFO] 127.0.0.1 GET / - Body: None
+2026-04-18 09:24:55,420 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-18 10:00:24,785 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:00:24,931 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-18 10:10:01,356 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:10:01,611 [ERROR] Error SQL fase 3: ('22003', '[22003] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error de desbordamiento aritmï¿½tico al convertir expression al tipo de datos datetime. (8115) (SQLExecDirectW)')
+2026-04-18 10:12:23,453 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:12:23,555 [ERROR] Error SQL fase 3: ('22003', '[22003] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error de desbordamiento aritmï¿½tico al convertir expression al tipo de datos datetime. (8115) (SQLExecDirectW)')
+2026-04-18 10:15:28,633 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:15:28,749 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]La conversiï¿½n del tipo de datos nvarchar en datetime produjo un valor fuera de intervalo. (242) (SQLExecDirectW)')
+2026-04-18 10:17:14,614 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:17:14,726 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+
+
+2026-04-18 10:21:33,510 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:21:33,602 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-18 10:22:32,766 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:22:32,905 [ERROR] Error SQL fase 3: ('The SQL contains 5 parameter markers, but 6 parameters were supplied', 'HY000')
+2026-04-18 10:23:32,210 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:23:32,304 [ERROR] Error SQL fase 3: ('The SQL contains 5 parameter markers, but 6 parameters were supplied', 'HY000')
+2026-04-18 10:25:39,537 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:25:39,623 [ERROR] Error SQL fase 3: ('The SQL contains 5 parameter markers, but 6 parameters were supplied', 'HY000')
+2026-04-18 10:26:07,624 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:26:07,884 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-18 10:33:50,198 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:33:50,338 [ERROR] Error SQL fase 3: ('22007', '[22007] [Microsoft][ODBC Driver 17 for SQL Server][SQL Server]Error al convertir una cadena de caracteres en fecha y/u hora. (241) (SQLExecDirectW)')
+2026-04-18 10:37:30,405 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:45:41,919 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:46:44,642 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:47:54,178 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:49:19,724 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:53:25,227 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:56:45,754 [INFO] Hilo de fase 3 iniciado
+2026-04-18 10:57:23,754 [INFO] Hilo de fase 3 iniciado
+2026-04-18 11:05:09,254 [INFO] Hilo de fase 3 iniciado
+2026-04-18 11:05:17,149 [INFO] 127.0.0.1 POST /ping - Body: None
+2026-04-18 11:05:21,526 [INFO] 127.0.0.1 POST /login - Body: {'usuario': 'PUI', 'clave': '***'}
+2026-04-18 11:06:01,084 [INFO] 127.0.0.1 POST /login - Body: {'usuario': 'PUI', 'clave': '***'}
+2026-04-18 11:10:41,007 [INFO] Hilo de fase 3 iniciado
+2026-04-18 11:10:46,520 [INFO] 127.0.0.1 POST /login - Body: {'usuario': 'PUI', 'clave': '***'}
+2026-04-18 11:23:36,574 [INFO] Hilo de fase 3 iniciado
+2026-04-18 11:23:44,019 [INFO] 127.0.0.1 POST /login - Body: {'usuario': 'PUI', 'clave': '***'}
+2026-04-18 11:25:37,851 [INFO] Hilo de fase 3 iniciado
+2026-04-18 11:25:45,049 [INFO] 127.0.0.1 POST /login - Body: {'usuario': 'PUI', 'clave': '***'}
+2026-04-18 11:26:26,071 [INFO] 127.0.0.1 POST /activar-reporte-prueba - Body: {'id': '550e8400-e29b-41d4-a716-446655440000', 'curp': 'CALI660126HSLBPG09', 'nombre': 'IGNACIO', 'primer_apellido': 'CABRERA', 'segundo_apellido': 'LOPEZ'}
+2026-04-18 11:26:36,286 [INFO] 127.0.0.1 POST /activar-reporte-prueba - Body: {'id': '550e8400-e29b-41d4-a716-446655440000', 'curp': 'CALI660126HSLBPG09', 'nombre': 'IGNACIO', 'primer_apellido': 'CABRERA', 'segundo_apellido': 'LOPEZ'}
+2026-04-18 11:27:25,092 [INFO] 127.0.0.1 POST /login - Body: {'usuario': 'PUI', 'clave': '***'}
+2026-04-18 11:27:38,804 [INFO] 127.0.0.1 POST /activar-reporte-prueba - Body: {'id': '550e8400-e29b-41d4-a716-446655440000', 'curp': 'CALI660126HSLBPG09', 'nombre': 'IGNACIO', 'primer_apellido': 'CABRERA', 'segundo_apellido': 'LOPEZ'}
+2026-04-18 11:28:36,160 [INFO] Hilo de fase 3 iniciado
+2026-04-18 11:28:44,170 [INFO] 127.0.0.1 POST /activar-reporte-prueba - Body: {'id': '550e8400-e29b-41d4-a716-446655440000', 'curp': 'CALI660126HSLBPG09', 'nombre': 'IGNACIO', 'primer_apellido': 'CABRERA', 'segundo_apellido': 'LOPEZ'}
+2026-04-18 11:29:14,574 [INFO] 127.0.0.1 POST /login - Body: {'usuario': 'PUI', 'clave': '***'}
+2026-04-18 11:29:26,321 [INFO] 127.0.0.1 POST /activar-reporte-prueba - Body: {'id': '550e8400-e29b-41d4-a716-446655440000', 'curp': 'CALI660126HSLBPG09', 'nombre': 'IGNACIO', 'primer_apellido': 'CABRERA', 'segundo_apellido': 'LOPEZ'}
+2026-04-18 11:29:29,103 [INFO] 127.0.0.1 POST /activar-reporte-prueba - Body: {'id': '550e8400-e29b-41d4-a716-446655440000', 'curp': 'CALI660126HSLBPG09', 'nombre': 'IGNACIO', 'primer_apellido': 'CABRERA', 'segundo_apellido': 'LOPEZ'}
