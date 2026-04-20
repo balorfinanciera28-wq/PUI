@@ -1,6 +1,3 @@
-from dotenv import load_dotenv
-load_dotenv()
-
 import os
 import json
 import time
@@ -14,7 +11,7 @@ from functools import wraps
 import jwt
 import pyodbc
 import requests
-from cryptography.fernet import Fernet, InvalidToken
+from cryptography.fernet import Fernet
 from flask import Flask, request, jsonify, g
 
 # =========================================================
@@ -23,49 +20,31 @@ from flask import Flask, request, jsonify, g
 def cargar_configuracion():
     key = os.getenv("APP_CONFIG_KEY")
     if not key:
-        raise ValueError("Falta APP_CONFIG_KEY")
-
-    key = key.strip()
+        raise ValueError("Falta APP_CONFIG_KEY en variables de entorno")
 
     config_path = os.getenv("APP_CONFIG_PATH", "config.enc")
-
     if not os.path.exists(config_path):
-        raise FileNotFoundError(f"No existe: {config_path}")
+        raise FileNotFoundError(f"No existe el archivo de configuración cifrado: {config_path}")
 
     with open(config_path, "rb") as f:
         encrypted_data = f.read()
 
-    try:
-        fernet = Fernet(key.encode())
-        decrypted_data = fernet.decrypt(encrypted_data)
-    except InvalidToken:
-        raise ValueError("❌ ERROR: APP_CONFIG_KEY incorrecta o config.enc corrupto")
+    fernet = Fernet(key.encode("utf-8"))
+    decrypted_data = fernet.decrypt(encrypted_data)
+    return json.loads(decrypted_data.decode("utf-8"))
 
-    return json.loads(decrypted_data.decode())
 
 CONFIG = cargar_configuracion()
-
-# =========================================================
-# ENV
-# =========================================================
-JWT_SECRET = os.getenv("JWT_SECRET")
-APP_USER = os.getenv("APP_USER")
-APP_PASSWORD = os.getenv("APP_PASSWORD")
-
-if not JWT_SECRET:
-    raise ValueError("Falta JWT_SECRET")
-
-if not APP_USER or not APP_PASSWORD:
-    raise ValueError("Faltan credenciales APP_USER / APP_PASSWORD")
-
-USUARIOS = {
-    APP_USER: APP_PASSWORD
-}
 
 # =========================================================
 # CONFIG GENERAL
 # =========================================================
 PORT = int(CONFIG.get("PORT", 5000))
+SECRET = CONFIG["APP_SECRET"]
+
+USUARIOS = CONFIG.get("USUARIOS", {
+    "PUI": "Jsrv0906BDI09061656*"
+})
 
 SQL_SERVER = CONFIG["SQL_SERVER"]
 SQL_DATABASE = CONFIG["SQL_DATABASE"]
@@ -74,43 +53,42 @@ SQL_PASSWORD = CONFIG["SQL_PASSWORD"]
 SQL_DRIVER = CONFIG.get("SQL_DRIVER", "{ODBC Driver 17 for SQL Server}")
 EMPRESA_ID = CONFIG["EMPRESA_ID"]
 
-PUI_BASE_URL = CONFIG["PUI_BASE_URL"].rstrip("/")  # <-- IMPORTANTE
-PUI_INSTITUCION_ID = CONFIG["PUI_INSTITUCION_ID"]
-PUI_CLAVE = CONFIG["PUI_CLAVE"]
+PUI_BASE_URL = CONFIG.get("PUI_BASE_URL", "https://pui.example.mx")
+PUI_INSTITUCION_ID = CONFIG.get("PUI_INSTITUCION_ID", "")
+PUI_CLAVE = CONFIG.get("PUI_CLAVE", "")
 
 LOCAL_DB_PATH = CONFIG.get("LOCAL_DB_PATH", "pui_local.db")
 REQUEST_TIMEOUT = int(CONFIG.get("REQUEST_TIMEOUT", 15))
-
 PHASE3_INTERVAL_SECONDS = int(CONFIG.get("PHASE3_INTERVAL_SECONDS", 3600))
-ENABLE_PHASE3_THREAD = CONFIG.get("ENABLE_PHASE3_THREAD", True)
+ENABLE_PHASE3_THREAD = bool(CONFIG.get("ENABLE_PHASE3_THREAD", True))
 
-# CACHE TOKEN
 PUI_TOKEN_CACHE = {
     "token": None,
     "exp": None
 }
 
-# THREAD
-PHASE3_THREAD = None
 PHASE3_STOP_EVENT = threading.Event()
+PHASE3_THREAD = None
 
 # =========================================================
 # LOGGING
 # =========================================================
-logger = logging.getLogger("app")
+logger = logging.getLogger("pui_institucion")
 logger.setLevel(logging.INFO)
 
 if not logger.handlers:
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
 
-    fh = logging.FileHandler("app.log")
-    fh.setFormatter(formatter)
+    file_handler = logging.FileHandler("app.log", encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(logging.INFO)
 
-    ch = logging.StreamHandler(sys.stdout)
-    ch.setFormatter(formatter)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(logging.INFO)
 
-    logger.addHandler(fh)
-    logger.addHandler(ch)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
 
 # =========================================================
 # FLASK
@@ -161,7 +139,7 @@ CURP_ESTADOS = {
 # SQLITE LOCAL
 # =========================================================
 def obtener_conexion_local():
-    conn = sqlite3.connect(LOCAL_DB_PATH)
+    conn = sqlite3.connect(LOCAL_DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -531,8 +509,7 @@ def generar_token_local(usuario):
         "institucion_id": usuario,
         "exp": datetime.utcnow() + timedelta(hours=1),
     }
-    #return jwt.encode(payload, SECRET, algorithm="HS256")
-    return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    return jwt.encode(payload, SECRET, algorithm="HS256")
 
 
 def requiere_token(f):
@@ -548,7 +525,7 @@ def requiere_token(f):
 
         try:
             token = auth.replace("Bearer ", "", 1).strip()
-            decoded = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            decoded = jwt.decode(token, SECRET, algorithms=["HS256"])
             g.usuario_id = decoded["institucion_id"]
 
             if g.usuario_id != "PUI":
@@ -820,17 +797,7 @@ def consultar_fase3_continua(reporte):
     nombre = normalizar_texto(reporte.get("nombre"))
     primer_apellido = normalizar_texto(reporte.get("primer_apellido"))
     segundo_apellido = normalizar_texto(reporte.get("segundo_apellido"))
-
-    # 🔥 FIX: formato compatible con SQL Server 2008
-    ultimo_corte = reporte.get("ultimo_corte_fase3")
-    if ultimo_corte:
-        try:
-            # intenta normalizar si viene en ISO
-            ultimo_corte = datetime.fromisoformat(ultimo_corte).strftime("%Y-%m-%d %H:%M:%S")
-        except:
-            ultimo_corte = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        ultimo_corte = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    ultimo_corte = reporte.get("ultimo_corte_fase3") or datetime.utcnow().isoformat()
 
     query = """
     SELECT
@@ -850,15 +817,14 @@ def consultar_fase3_continua(reporte):
         cc.NoExterior,
         cc.NoInterior,
         cc.CodigoPostal,
-        cc.Fecha AS FechaEvento,
+        COALESCE(cc.UltimaAct, cc.Fecha) AS FechaEvento,
         ca.EmpresaID
     FROM CatAvales AS cc
     INNER JOIN CatClientes AS ca
         ON cc.ClienteID = ca.ClienteID
     WHERE ca.EmpresaID = ?
       AND UPPER(LTRIM(RTRIM(ISNULL(cc.CURP, '')))) = ?
-      AND ISDATE(cc.Fecha) = 1
-      AND CONVERT(datetime, cc.Fecha) > CONVERT(datetime, ?, 120)
+      AND COALESCE(cc.UltimaAct, cc.Fecha) > ?
     """
 
     params = [EMPRESA_ID, curp, ultimo_corte]
@@ -875,7 +841,7 @@ def consultar_fase3_continua(reporte):
         query += " AND UPPER(LTRIM(RTRIM(ISNULL(cc.ApellidoMaterno, '')))) = ?"
         params.append(segundo_apellido)
 
-    query += " ORDER BY CONVERT(datetime, cc.Fecha) ASC"
+    query += " ORDER BY COALESCE(cc.UltimaAct, cc.Fecha) ASC"
 
     registrar_auditoria(
         "CONSULTA_SQL_FASE3",
@@ -885,7 +851,7 @@ def consultar_fase3_continua(reporte):
 
     try:
         coincidencias = []
-        nuevo_corte = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        nuevo_corte = datetime.utcnow().isoformat()
 
         with obtener_conexion_sql() as conn:
             cursor = conn.cursor()
@@ -915,12 +881,7 @@ def consultar_fase3_continua(reporte):
                     "fecha_nacimiento": formato_fecha_iso(data.get("FechaNacimiento")),
                     "sexo_asignado": valor_o_none(data.get("Genero")),
                     "direccion": valor_o_none(data.get("Calle")),
-                    "numero": " ".join([
-                        p for p in [
-                            valor_o_none(data.get("NoExterior")),
-                            valor_o_none(data.get("NoInterior"))
-                        ] if p
-                    ]) or None,
+                    "numero": " ".join([p for p in [valor_o_none(data.get("NoExterior")), valor_o_none(data.get("NoInterior"))] if p]) or None,
                     "codigo_postal": valor_o_none(data.get("CodigoPostal")),
                     "empresa_id": str(data.get("EmpresaID")) if data.get("EmpresaID") else None,
                     "fecha_evento": formato_fecha_iso(data.get("FechaEvento")),
@@ -933,10 +894,8 @@ def consultar_fase3_continua(reporte):
 
     except Exception as e:
         logger.error(f"Error SQL fase 3: {e}")
-        return {
-            "coincidencias": [],
-            "nuevo_corte": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-        }
+        return {"coincidencias": [], "nuevo_corte": datetime.utcnow().isoformat()}
+
 # =========================================================
 # PAYLOAD /notificar-coincidencia
 # =========================================================
@@ -1160,19 +1119,13 @@ def iniciar_worker_fase3():
 # =========================================================
 @app.route("/login", methods=["POST"])
 def login():
-
-    print(">>> ENTRE A LOGIN <<<")
-    print("USUARIOS CONFIG:", USUARIOS)
     data = request.get_json(silent=True)
 
     if not data:
         return jsonify({"error": "JSON no enviado"}), 400
 
-    usuario = (data.get("usuario") or "").strip()
-    clave = (data.get("clave") or "").strip()
-
-    print("USUARIO:", usuario)
-    print("CLAVE:", clave)
+    usuario = data.get("usuario")
+    clave = data.get("clave")
 
     if not usuario or not clave:
         return jsonify({"error": "Credenciales inválidas"}), 403
@@ -1181,7 +1134,6 @@ def login():
         return jsonify({"error": "Credenciales inválidas"}), 403
 
     token = generar_token_local(usuario)
-
     return jsonify({
         "token": token,
         "access_token": token,
