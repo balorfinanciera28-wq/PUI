@@ -4,3 +4,5 @@ PyJWT==2.8.0
 pyodbc
 cryptography
 waitress
+Flask-Limiter==3.5.0
+python-dotenv

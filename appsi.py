@@ -1,3 +1,6 @@
+from dotenv import load_dotenv
+load_dotenv()
+
 import os
 import json
 import time
@@ -5,14 +8,22 @@ import sqlite3
 import logging
 import sys
 import threading
+import hashlib
+import signal
+import re
 from datetime import datetime, timedelta
 from functools import wraps
+from logging.handlers import RotatingFileHandler
 
 import jwt
 import pyodbc
 import requests
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from flask import Flask, request, jsonify, g
+from waitress import serve
+
+# Enable pyodbc connection pooling
+pyodbc.pooling = True
 
 # =========================================================
 # CONFIGURACIÓN CIFRADA
@@ -20,31 +31,49 @@ from flask import Flask, request, jsonify, g
 def cargar_configuracion():
     key = os.getenv("APP_CONFIG_KEY")
     if not key:
-        raise ValueError("Falta APP_CONFIG_KEY en variables de entorno")
+        raise ValueError("Falta APP_CONFIG_KEY")
+
+    key = key.strip()
 
     config_path = os.getenv("APP_CONFIG_PATH", "config.enc")
+
     if not os.path.exists(config_path):
-        raise FileNotFoundError(f"No existe el archivo de configuración cifrado: {config_path}")
+        raise FileNotFoundError(f"No existe: {config_path}")
 
     with open(config_path, "rb") as f:
         encrypted_data = f.read()
 
-    fernet = Fernet(key.encode("utf-8"))
-    decrypted_data = fernet.decrypt(encrypted_data)
-    return json.loads(decrypted_data.decode("utf-8"))
+    try:
+        fernet = Fernet(key.encode())
+        decrypted_data = fernet.decrypt(encrypted_data)
+    except InvalidToken:
+        raise ValueError("❌ ERROR: APP_CONFIG_KEY incorrecta o config.enc corrupto")
 
+    return json.loads(decrypted_data.decode())
 
 CONFIG = cargar_configuracion()
+
+# =========================================================
+# ENV
+# =========================================================
+JWT_SECRET = os.getenv("JWT_SECRET")
+APP_USER = os.getenv("APP_USER")
+APP_PASSWORD = os.getenv("APP_PASSWORD")
+
+if not JWT_SECRET:
+    raise ValueError("Falta JWT_SECRET")
+
+if not APP_USER or not APP_PASSWORD:
+    raise ValueError("Faltan credenciales APP_USER / APP_PASSWORD")
+
+USUARIOS = {
+    APP_USER: APP_PASSWORD
+}
 
 # =========================================================
 # CONFIG GENERAL
 # =========================================================
 PORT = int(CONFIG.get("PORT", 5000))
-SECRET = CONFIG["APP_SECRET"]
-
-USUARIOS = CONFIG.get("USUARIOS", {
-    "PUI": "Jsrv0906BDI09061656*"
-})
 
 SQL_SERVER = CONFIG["SQL_SERVER"]
 SQL_DATABASE = CONFIG["SQL_DATABASE"]
@@ -53,51 +82,80 @@ SQL_PASSWORD = CONFIG["SQL_PASSWORD"]
 SQL_DRIVER = CONFIG.get("SQL_DRIVER", "{ODBC Driver 17 for SQL Server}")
 EMPRESA_ID = CONFIG["EMPRESA_ID"]
 
-PUI_BASE_URL = CONFIG.get("PUI_BASE_URL", "https://pui.example.mx")
-PUI_INSTITUCION_ID = CONFIG.get("PUI_INSTITUCION_ID", "")
-PUI_CLAVE = CONFIG.get("PUI_CLAVE", "")
+PUI_BASE_URL = CONFIG["PUI_BASE_URL"].rstrip("/")  # <-- IMPORTANTE
+PUI_INSTITUCION_ID = CONFIG["PUI_INSTITUCION_ID"]
+PUI_CLAVE = CONFIG["PUI_CLAVE"]
 
 LOCAL_DB_PATH = CONFIG.get("LOCAL_DB_PATH", "pui_local.db")
 REQUEST_TIMEOUT = int(CONFIG.get("REQUEST_TIMEOUT", 15))
-PHASE3_INTERVAL_SECONDS = int(CONFIG.get("PHASE3_INTERVAL_SECONDS", 3600))
-ENABLE_PHASE3_THREAD = bool(CONFIG.get("ENABLE_PHASE3_THREAD", True))
 
+PHASE3_INTERVAL_SECONDS = int(CONFIG.get("PHASE3_INTERVAL_SECONDS", 300))
+ENABLE_PHASE3_THREAD = CONFIG.get("ENABLE_PHASE3_THREAD", True)
+
+# CACHE TOKEN
 PUI_TOKEN_CACHE = {
     "token": None,
     "exp": None
 }
+PUI_TOKEN_LOCK = threading.Lock()
 
-PHASE3_STOP_EVENT = threading.Event()
+# RATE LIMITER (simple in-memory)
+LOGIN_ATTEMPTS = {}
+LOGIN_ATTEMPTS_LOCK = threading.Lock()
+
+# THREAD
 PHASE3_THREAD = None
+PHASE3_STOP_EVENT = threading.Event()
 
 # =========================================================
 # LOGGING
 # =========================================================
-logger = logging.getLogger("pui_institucion")
+logger = logging.getLogger("app")
 logger.setLevel(logging.INFO)
 
 if not logger.handlers:
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
 
-    file_handler = logging.FileHandler("app.log", encoding="utf-8")
-    file_handler.setFormatter(formatter)
-    file_handler.setLevel(logging.INFO)
+    fh = RotatingFileHandler("app.log", maxBytes=10*1024*1024, backupCount=5)
+    fh.setFormatter(formatter)
 
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(logging.INFO)
+    ch = logging.StreamHandler(sys.stdout)
+    ch.setFormatter(formatter)
 
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+
+# Signal handling for graceful shutdown
+def signal_handler(signum, frame):
+    logger.info(f"Recibida señal {signum}, iniciando shutdown limpio...")
+    PHASE3_STOP_EVENT.set()
+    if PHASE3_THREAD and PHASE3_THREAD.is_alive():
+        PHASE3_THREAD.join(timeout=5)
+    logger.info("Shutdown limpio completado")
+    sys.exit(0)
+
+# Register signal handlers (works on Unix and Windows)
+try:
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+except (AttributeError, ValueError):
+    # Windows may not support all signals, fallback to atexit
+    import atexit
+    atexit.register(lambda: (PHASE3_STOP_EVENT.set(), logger.info("Shutdown via atexit")))
 
 # =========================================================
 # FLASK
 # =========================================================
 app = Flask(__name__)
+# Limit request size to 1MB to prevent oversized payloads
+app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024
 
 # =========================================================
 # MAPEO CURP -> LUGAR_NACIMIENTO
 # =========================================================
+# CURP Regex for stronger validation
+CURP_REGEX = r'^[A-Z]{4}\d{6}[HM][A-Z]{5}[A-Z0-9]\d$'
+
 CURP_ESTADOS = {
     "AS": "AGUASCALIENTES",
     "BC": "BAJA CALIFORNIA",
@@ -139,8 +197,13 @@ CURP_ESTADOS = {
 # SQLITE LOCAL
 # =========================================================
 def obtener_conexion_local():
-    conn = sqlite3.connect(LOCAL_DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(LOCAL_DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    # Enable WAL mode for better concurrency and reduced blocking
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    # Set busy_timeout to prevent database locked errors (5000ms = 5 seconds)
+    conn.execute("PRAGMA busy_timeout=5000;")
     return conn
 
 
@@ -174,9 +237,25 @@ def inicializar_db_local():
             fecha_recepcion TEXT,
             fecha_actualizacion TEXT,
             ultimo_corte_fase3 TEXT,
-            activa_fase3 INTEGER DEFAULT 1
+            activa_fase3 INTEGER DEFAULT 0,
+            procesando_fase3 INTEGER DEFAULT 0,
+            procesando_fase3_timestamp TEXT
         )
         """)
+
+        # Add procesando_fase3 column if it doesn't exist (for existing databases)
+        try:
+            cur.execute("ALTER TABLE reportes ADD COLUMN procesando_fase3 INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            # Column already exists, ignore
+            pass
+
+        # Add procesando_fase3_timestamp column if it doesn't exist (for existing databases)
+        try:
+            cur.execute("ALTER TABLE reportes ADD COLUMN procesando_fase3_timestamp TEXT")
+        except sqlite3.OperationalError:
+            # Column already exists, ignore
+            pass
 
         cur.execute("""
         CREATE TABLE IF NOT EXISTS coincidencias (
@@ -205,18 +284,11 @@ def inicializar_db_local():
         )
         """)
 
-        conn.commit()
+        # Create indexes for performance
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_reportes_estatus ON reportes(estatus)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_reportes_fase3 ON reportes(activa_fase3, procesando_fase3)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_coincidencias_reporte ON coincidencias(reporte_id)")
 
-
-def registrar_auditoria(evento, referencia_id=None, detalle=None):
-    with obtener_conexion_local() as conn:
-        conn.execute(
-            """
-            INSERT INTO auditoria (evento, referencia_id, detalle, fecha_evento)
-            VALUES (?, ?, ?, ?)
-            """,
-            (evento, referencia_id, detalle, datetime.utcnow().isoformat())
-        )
         conn.commit()
 
 
@@ -254,7 +326,8 @@ def guardar_reporte_local(data, usuario_receptor, estatus, fase_actual=None):
                 estatus=excluded.estatus,
                 fase_actual=excluded.fase_actual,
                 usuario_receptor=excluded.usuario_receptor,
-                fecha_actualizacion=excluded.fecha_actualizacion
+                fecha_actualizacion=excluded.fecha_actualizacion,
+                ultimo_corte_fase3=excluded.ultimo_corte_fase3
             """,
             (
                 data["id"],
@@ -327,6 +400,37 @@ def desactivar_fase3_local(reporte_id):
         conn.commit()
 
 
+def marcar_procesando_fase3(reporte_id):
+    with obtener_conexion_local() as conn:
+        cursor = conn.execute(
+            """
+            UPDATE reportes
+            SET procesando_fase3 = 1,
+                procesando_fase3_timestamp = ?,
+                fecha_actualizacion = ?
+            WHERE id = ? AND procesando_fase3 = 0
+            """,
+            (datetime.utcnow().isoformat(), datetime.utcnow().isoformat(), reporte_id)
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def desmarcar_procesando_fase3(reporte_id):
+    with obtener_conexion_local() as conn:
+        conn.execute(
+            """
+            UPDATE reportes
+            SET procesando_fase3 = 0,
+                procesando_fase3_timestamp = NULL,
+                fecha_actualizacion = ?
+            WHERE id = ?
+            """,
+            (datetime.utcnow().isoformat(), reporte_id)
+        )
+        conn.commit()
+
+
 def guardar_coincidencia_local(reporte_id, fase_busqueda, payload, respuesta_pui, hash_unico):
     with obtener_conexion_local() as conn:
         conn.execute(
@@ -355,27 +459,102 @@ def existe_coincidencia_hash(hash_unico):
         return row is not None
 
 
+def registrar_auditoria(evento, referencia_id, detalle):
+    try:
+        with obtener_conexion_local() as conn:
+            conn.execute(
+                """
+                INSERT INTO auditoria (evento, referencia_id, detalle, fecha_evento)
+                VALUES (?, ?, ?, ?)
+                """,
+                (evento, referencia_id, detalle, datetime.utcnow().isoformat())
+            )
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Error auditoría: {e}")
+
+
 def obtener_reportes_fase3_activos():
     with obtener_conexion_local() as conn:
+        # Cleanup stale processing flags (timeout of 1 hour) in case worker died
+        try:
+            conn.execute(
+                """
+                UPDATE reportes
+                SET procesando_fase3 = 0,
+                    procesando_fase3_timestamp = NULL
+                WHERE procesando_fase3 = 1
+                  AND procesando_fase3_timestamp IS NOT NULL
+                  AND procesando_fase3_timestamp < datetime('now', '-1 hour')
+                """
+            )
+            conn.commit()
+        except Exception as e:
+            logger.error(f"Error limpiando flags stale: {e}")
+        
         rows = conn.execute(
             """
             SELECT *
             FROM reportes
             WHERE activa_fase3 = 1
               AND estatus NOT IN ('DESACTIVADO')
+              AND procesando_fase3 = 0
+            LIMIT 50
             """
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [row_to_dict(r) for r in rows]
 
 
 def row_to_dict(row):
     if row is None:
         return None
-    return {k: row[k] for k in row.keys()}
+    result = {}
+    for k in row.keys():
+        val = row[k]
+        # Convert datetime objects to ISO strings for JSON serialization
+        if isinstance(val, datetime):
+            result[k] = val.isoformat()
+        else:
+            result[k] = val
+    return result
 
-# =========================================================
-# HELPERS
-# =========================================================
+
+def ejecutar_con_reintento(fn, retries=3):
+    """Retry wrapper for SQLite writes to handle database locked errors"""
+    for i in range(retries):
+        try:
+            return fn()
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower() and i < retries - 1:
+                wait_time = 0.2 * (i + 1)
+                logger.warning(f"SQLite locked, retrying in {wait_time}s (attempt {i + 1}/{retries})")
+                time.sleep(wait_time)
+                continue
+            raise
+
+
+def limpiar_db_antigua():
+    """Clean up old records to prevent database bloat"""
+    try:
+        with obtener_conexion_local() as conn:
+            # Delete audit records older than 30 days
+            deleted_auditoria = conn.execute(
+                "DELETE FROM auditoria WHERE fecha_evento < datetime('now', '-30 days')"
+            ).rowcount
+            
+            # Delete coincidence records older than 90 days
+            deleted_coincidencias = conn.execute(
+                "DELETE FROM coincidencias WHERE fecha_envio < datetime('now', '-90 days')"
+            ).rowcount
+            
+            conn.commit()
+            
+            if deleted_auditoria > 0 or deleted_coincidencias > 0:
+                logger.info(f"Limpieza DB: {deleted_auditoria} auditoria, {deleted_coincidencias} coincidencias eliminadas")
+    except Exception as e:
+        logger.error(f"Error en limpieza de DB: {e}")
+
+
 def normalizar_texto(valor):
     if valor is None:
         return None
@@ -405,9 +584,15 @@ def formato_fecha_iso(valor):
     if isinstance(valor, datetime):
         return valor.strftime("%Y-%m-%d")
     texto = str(valor).strip()
-    if len(texto) >= 10:
-        return texto[:10]
-    return texto
+    # Try strict parsing first
+    try:
+        dt = datetime.strptime(texto[:10], "%Y-%m-%d")
+        return dt.strftime("%Y-%m-%d")
+    except (ValueError, IndexError):
+        # Fallback to string cutting if parsing fails
+        if len(texto) >= 10:
+            return texto[:10]
+        return texto
 
 
 def lugar_nacimiento_desde_curp(curp):
@@ -428,7 +613,13 @@ def calcular_fecha_inicio_historica(fecha_desaparicion):
     except Exception:
         return None, hoy
 
-    hace_12_anios = hoy - timedelta(days=12 * 365)
+    # Calculate 12 years ago correctly handling leap years
+    try:
+        hace_12_anios = hoy.replace(year=hoy.year - 12)
+    except ValueError:
+        # Handle edge case when today is Feb 29 and 12 years ago is not a leap year
+        hace_12_anios = hoy.replace(year=hoy.year - 12, day=28)
+    
     if f < hace_12_anios:
         f = hace_12_anios
     return f, hoy
@@ -440,10 +631,11 @@ def generar_hash_coincidencia(reporte_id, fase_busqueda, detalle):
         "fase_busqueda": fase_busqueda,
         "cliente_id": detalle.get("cliente_id"),
         "aval_id": detalle.get("aval_id"),
-        "fecha_evento": detalle.get("fecha_evento"),
+        "fecha_evento": detalle.get("fecha_evento"),  # Preserve raw value including milliseconds
         "curp": detalle.get("curp"),
     }
-    return json.dumps(base, sort_keys=True, ensure_ascii=False)
+    base_str = json.dumps(base, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(base_str.encode()).hexdigest()
 
 # =========================================================
 # VALIDACIONES
@@ -474,8 +666,8 @@ def validar_curp(curp):
     curp = curp.strip().upper()
     if len(curp) != 18:
         return False, "CURP debe tener 18 caracteres"
-    if not curp.isalnum():
-        return False, "CURP debe contener sólo letras y números"
+    if not re.match(CURP_REGEX, curp):
+        return False, "CURP formato inválido"
     return True, curp
 
 
@@ -499,17 +691,34 @@ def obtener_conexion_sql():
         f"PWD={SQL_PASSWORD};"
         "TrustServerCertificate=yes;"
     )
-    return pyodbc.connect(conn_str, timeout=REQUEST_TIMEOUT)
+    max_retries = 3
+    for intento in range(max_retries):
+        try:
+            return pyodbc.connect(conn_str, timeout=REQUEST_TIMEOUT)
+        except Exception as e:
+            if intento == max_retries - 1:
+                raise
+            wait_time = 2 ** intento
+            logger.warning(f"Error conectando a SQL Server (intento {intento + 1}/{max_retries}): {e}. Reintentando en {wait_time}s...")
+            time.sleep(wait_time)
 
 # =========================================================
 # JWT LOCAL
 # =========================================================
 def generar_token_local(usuario):
+    now = datetime.utcnow()
     payload = {
         "institucion_id": usuario,
-        "exp": datetime.utcnow() + timedelta(hours=1),
+        "iss": "pui-webhook",
+        "aud": "pui-api",
+        "iat": now,
+        "nbf": now,
+        "exp": now + timedelta(hours=1),
     }
-    return jwt.encode(payload, SECRET, algorithm="HS256")
+    token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+    if isinstance(token, bytes):
+        token = token.decode("utf-8")
+    return token
 
 
 def requiere_token(f):
@@ -525,14 +734,24 @@ def requiere_token(f):
 
         try:
             token = auth.replace("Bearer ", "", 1).strip()
-            decoded = jwt.decode(token, SECRET, algorithms=["HS256"])
+            decoded = jwt.decode(
+                token,
+                JWT_SECRET,
+                algorithms=["HS256"],
+                audience="pui-api",
+                issuer="pui-webhook"
+            )
             g.usuario_id = decoded["institucion_id"]
 
-            if g.usuario_id != "PUI":
+            if g.usuario_id not in USUARIOS:
                 return jsonify({"codigo": "403", "mensaje": "Sin permisos"}), 403
 
         except jwt.ExpiredSignatureError:
             return jsonify({"codigo": "401", "mensaje": "Token expirado"}), 401
+        except jwt.InvalidAudienceError:
+            return jsonify({"codigo": "401", "mensaje": "Audience inválido"}), 401
+        except jwt.InvalidIssuerError:
+            return jsonify({"codigo": "401", "mensaje": "Issuer inválido"}), 401
         except jwt.InvalidTokenError:
             return jsonify({"codigo": "401", "mensaje": "Token inválido"}), 401
         except Exception:
@@ -545,38 +764,53 @@ def requiere_token(f):
 # TOKEN PUI
 # =========================================================
 def obtener_token_pui():
-    ahora = datetime.utcnow()
+    with PUI_TOKEN_LOCK:
+        ahora = datetime.utcnow()
 
-    if PUI_TOKEN_CACHE["token"] and PUI_TOKEN_CACHE["exp"] and ahora < PUI_TOKEN_CACHE["exp"]:
-        return PUI_TOKEN_CACHE["token"]
+        if PUI_TOKEN_CACHE["token"] and PUI_TOKEN_CACHE["exp"] and ahora < PUI_TOKEN_CACHE["exp"]:
+            return PUI_TOKEN_CACHE["token"]
 
-    if not PUI_INSTITUCION_ID or not PUI_CLAVE:
-        raise ValueError("Faltan PUI_INSTITUCION_ID o PUI_CLAVE en configuración")
+        if not PUI_INSTITUCION_ID or not PUI_CLAVE:
+            raise ValueError("Faltan PUI_INSTITUCION_ID o PUI_CLAVE en configuración")
 
-    url = f"{PUI_BASE_URL.rstrip('/')}/login"
-    payload = {
-        "institucion_id": PUI_INSTITUCION_ID,
-        "clave": PUI_CLAVE,
-    }
+        url = f"{PUI_BASE_URL.rstrip('/')}/login"
+        payload = {
+            "institucion_id": PUI_INSTITUCION_ID,
+            "clave": PUI_CLAVE,
+        }
 
-    r = requests.post(
-        url,
-        json=payload,
-        headers={"Content-Type": "application/json; charset=utf-8"},
-        timeout=REQUEST_TIMEOUT
-    )
-    r.raise_for_status()
-    data = r.json()
+        # Retry logic with exponential backoff
+        for intento in range(3):
+            try:
+                r = requests.post(
+                    url,
+                    json=payload,
+                    headers={"Content-Type": "application/json; charset=utf-8"},
+                    timeout=(5, REQUEST_TIMEOUT)
+                )
+                r.raise_for_status()
+                
+                try:
+                    data = r.json()
+                except Exception:
+                    raise ValueError(f"Respuesta inválida de PUI: {r.text}")
 
-    token = data.get("token") or data.get("access_token")
-    if not token:
-        raise ValueError("La PUI no devolvió token")
+                token = data.get("token") or data.get("access_token")
+                if not token:
+                    raise ValueError("La PUI no devolvió token")
 
-    expires_in = int(data.get("expires_in", 3600))
-    margen = max(60, int(expires_in * 0.20))
-    PUI_TOKEN_CACHE["token"] = token
-    PUI_TOKEN_CACHE["exp"] = ahora + timedelta(seconds=(expires_in - margen))
-    return token
+                expires_in = int(data.get("expires_in", 3600))
+                margen = max(60, int(expires_in * 0.20))
+                PUI_TOKEN_CACHE["token"] = token
+                PUI_TOKEN_CACHE["exp"] = ahora + timedelta(seconds=(expires_in - margen))
+                return token
+
+            except (requests.RequestException, ValueError) as e:
+                if intento == 2:
+                    raise
+                wait_time = 2 ** intento
+                logger.warning(f"Intento {intento + 1}/3 error obteniendo token PUI: {e}. Reintentando en {wait_time}s...")
+                time.sleep(wait_time)
 
 # =========================================================
 # FASE 1
@@ -797,7 +1031,18 @@ def consultar_fase3_continua(reporte):
     nombre = normalizar_texto(reporte.get("nombre"))
     primer_apellido = normalizar_texto(reporte.get("primer_apellido"))
     segundo_apellido = normalizar_texto(reporte.get("segundo_apellido"))
-    ultimo_corte = reporte.get("ultimo_corte_fase3") or datetime.utcnow().isoformat()
+
+    # 🔥 FIX: Pass native datetime object to SQL Server for safer comparison
+    ultimo_corte = reporte.get("ultimo_corte_fase3")
+    if ultimo_corte:
+        try:
+            # Parse ISO format from datetime.utcnow().isoformat()
+            ultimo_corte_dt = datetime.fromisoformat(ultimo_corte)
+        except (ValueError, TypeError):
+            # Fallback a datetime actual
+            ultimo_corte_dt = datetime.utcnow()
+    else:
+        ultimo_corte_dt = datetime.utcnow()
 
     query = """
     SELECT
@@ -817,17 +1062,18 @@ def consultar_fase3_continua(reporte):
         cc.NoExterior,
         cc.NoInterior,
         cc.CodigoPostal,
-        COALESCE(cc.UltimaAct, cc.Fecha) AS FechaEvento,
+        cc.Fecha AS FechaEvento,
         ca.EmpresaID
     FROM CatAvales AS cc
     INNER JOIN CatClientes AS ca
         ON cc.ClienteID = ca.ClienteID
     WHERE ca.EmpresaID = ?
       AND UPPER(LTRIM(RTRIM(ISNULL(cc.CURP, '')))) = ?
-      AND COALESCE(cc.UltimaAct, cc.Fecha) > ?
+      AND ISDATE(cc.Fecha) = 1
+      AND CONVERT(datetime, cc.Fecha, 120) > ?
     """
 
-    params = [EMPRESA_ID, curp, ultimo_corte]
+    params = [EMPRESA_ID, curp, ultimo_corte_dt]
 
     if nombre:
         query += " AND UPPER(LTRIM(RTRIM(ISNULL(cc.Nombre, '')))) = ?"
@@ -841,17 +1087,17 @@ def consultar_fase3_continua(reporte):
         query += " AND UPPER(LTRIM(RTRIM(ISNULL(cc.ApellidoMaterno, '')))) = ?"
         params.append(segundo_apellido)
 
-    query += " ORDER BY COALESCE(cc.UltimaAct, cc.Fecha) ASC"
+    query += " ORDER BY CONVERT(datetime, cc.Fecha, 120) ASC"
 
     registrar_auditoria(
         "CONSULTA_SQL_FASE3",
         reporte["id"],
-        json.dumps({"query": query, "params": params}, ensure_ascii=False)
+        json.dumps({"query": query, "params": [str(p) if isinstance(p, datetime) else p for p in params]}, ensure_ascii=False)
     )
 
     try:
         coincidencias = []
-        nuevo_corte = datetime.utcnow().isoformat()
+        nuevo_corte = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
         with obtener_conexion_sql() as conn:
             cursor = conn.cursor()
@@ -881,7 +1127,12 @@ def consultar_fase3_continua(reporte):
                     "fecha_nacimiento": formato_fecha_iso(data.get("FechaNacimiento")),
                     "sexo_asignado": valor_o_none(data.get("Genero")),
                     "direccion": valor_o_none(data.get("Calle")),
-                    "numero": " ".join([p for p in [valor_o_none(data.get("NoExterior")), valor_o_none(data.get("NoInterior"))] if p]) or None,
+                    "numero": " ".join([
+                        p for p in [
+                            valor_o_none(data.get("NoExterior")),
+                            valor_o_none(data.get("NoInterior"))
+                        ] if p
+                    ]) or None,
                     "codigo_postal": valor_o_none(data.get("CodigoPostal")),
                     "empresa_id": str(data.get("EmpresaID")) if data.get("EmpresaID") else None,
                     "fecha_evento": formato_fecha_iso(data.get("FechaEvento")),
@@ -894,8 +1145,10 @@ def consultar_fase3_continua(reporte):
 
     except Exception as e:
         logger.error(f"Error SQL fase 3: {e}")
-        return {"coincidencias": [], "nuevo_corte": datetime.utcnow().isoformat()}
-
+        return {
+            "coincidencias": [],
+            "nuevo_corte": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        }
 # =========================================================
 # PAYLOAD /notificar-coincidencia
 # =========================================================
@@ -980,7 +1233,7 @@ def notificar_coincidencia_pui(reporte, detalle, fase_busqueda):
 
     for intento in range(3):
         try:
-            r = requests.post(url, json=payload, headers=headers, timeout=REQUEST_TIMEOUT)
+            r = requests.post(url, json=payload, headers=headers, timeout=(5, REQUEST_TIMEOUT))
             respuesta = {"status_code": r.status_code, "body": r.text}
 
             registrar_auditoria(
@@ -988,7 +1241,6 @@ def notificar_coincidencia_pui(reporte, detalle, fase_busqueda):
                 reporte["id"],
                 json.dumps({"payload": payload, "respuesta": respuesta}, ensure_ascii=False)
             )
-
             if r.status_code == 200:
                 guardar_coincidencia_local(reporte["id"], str(fase_busqueda), payload, respuesta, hash_unico)
                 return True, payload, respuesta
@@ -996,10 +1248,9 @@ def notificar_coincidencia_pui(reporte, detalle, fase_busqueda):
         except requests.RequestException as e:
             logger.error(f"Intento {intento + 1} error notificar coincidencia: {e}")
 
-        time.sleep(2)
+        time.sleep(2 ** intento)
 
     return False, payload, {"status_code": 500, "body": "No fue posible notificar a la PUI"}
-
 
 def enviar_busqueda_finalizada_pui(reporte_id):
     token_pui = obtener_token_pui()
@@ -1014,7 +1265,7 @@ def enviar_busqueda_finalizada_pui(reporte_id):
         "Content-Type": "application/json; charset=utf-8"
     }
 
-    r = requests.post(url, json=payload, headers=headers, timeout=REQUEST_TIMEOUT)
+    r = requests.post(url, json=payload, headers=headers, timeout=(5, REQUEST_TIMEOUT))
 
     registrar_auditoria(
         "ENVIO_BUSQUEDA_FINALIZADA",
@@ -1074,73 +1325,95 @@ def ejecutar_fase2(reporte):
 
 
 def ejecutar_fase3_para_reporte(reporte):
-    resultado = consultar_fase3_continua(reporte)
+    # Mark as processing to prevent duplicate processing in multi-instance deployments
+    # Returns False if another process already claimed this report
+    if not marcar_procesando_fase3(reporte["id"]):
+        logger.info(f"Reporte {reporte['id']} ya está siendo procesado por otro worker, omitiendo")
+        return {"coincidencias": [], "nuevo_corte": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")}
+    
+    try:
+        resultado = consultar_fase3_continua(reporte)
 
-    for detalle in resultado["coincidencias"]:
-        notificar_coincidencia_pui(reporte, detalle, "3")
+        for detalle in resultado["coincidencias"]:
+            notificar_coincidencia_pui(reporte, detalle, "3")
 
-    actualizar_corte_fase3(reporte["id"], resultado["nuevo_corte"])
-    if resultado["coincidencias"]:
-        actualizar_estatus_reporte_local(reporte["id"], "COINCIDENCIA_FASE3_NOTIFICADA", "3")
+        actualizar_corte_fase3(reporte["id"], resultado["nuevo_corte"])
+        if resultado["coincidencias"]:
+            actualizar_estatus_reporte_local(reporte["id"], "COINCIDENCIA_FASE3_NOTIFICADA", "3")
 
-    return resultado
-
-# =========================================================
-# WORKER FASE 3
-# =========================================================
-def worker_fase3():
-    logger.info("Hilo de fase 3 iniciado")
-    while not PHASE3_STOP_EVENT.is_set():
-        try:
-            reportes = obtener_reportes_fase3_activos()
-            for reporte in reportes:
-                ejecutar_fase3_para_reporte(reporte)
-        except Exception as e:
-            logger.error(f"Error en worker fase 3: {e}")
-
-        PHASE3_STOP_EVENT.wait(PHASE3_INTERVAL_SECONDS)
-
-    logger.info("Hilo de fase 3 detenido")
-
-
-def iniciar_worker_fase3():
-    global PHASE3_THREAD
-    if not ENABLE_PHASE3_THREAD:
-        logger.info("Fase 3 automática deshabilitada")
-        return
-    if PHASE3_THREAD and PHASE3_THREAD.is_alive():
-        return
-
-    PHASE3_THREAD = threading.Thread(target=worker_fase3, daemon=True)
-    PHASE3_THREAD.start()
+        return resultado
+    finally:
+        # Always unmark processing flag, even if an error occurs
+        desmarcar_procesando_fase3(reporte["id"])
 
 # =========================================================
 # ENDPOINTS
 # =========================================================
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"}), 200
+
 @app.route("/login", methods=["POST"])
 def login():
+    # Get real IP from X-Forwarded-For header if behind proxy
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    if ip and "," in ip:
+        ip = ip.split(",")[0].strip()  # Take first IP in chain
+    
+    now = datetime.utcnow()
+    
+    with LOGIN_ATTEMPTS_LOCK:
+        # Clean up old attempts (older than 15 minutes)
+        cutoff = now - timedelta(minutes=15)
+        LOGIN_ATTEMPTS[ip] = [t for t in LOGIN_ATTEMPTS.get(ip, []) if t > cutoff]
+        
+        # Periodic cleanup of old IPs to prevent memory growth
+        if len(LOGIN_ATTEMPTS) > 10000:
+            LOGIN_ATTEMPTS.clear()
+            LOGIN_ATTEMPTS.update({
+                ip: times for ip, times in LOGIN_ATTEMPTS.items()
+                if any(t > cutoff for t in times)
+            })
+        
+        # Check if rate limit exceeded
+        if len(LOGIN_ATTEMPTS.get(ip, [])) >= 5:
+            logger.warning(f"Rate limit exceeded for IP: {ip}")
+            return jsonify({"error": "Demasiados intentos. Intente más tarde."}), 429
+    
     data = request.get_json(silent=True)
 
     if not data:
         return jsonify({"error": "JSON no enviado"}), 400
 
-    usuario = data.get("usuario")
-    clave = data.get("clave")
+    usuario = (data.get("usuario") or "").strip()
+    clave = (data.get("clave") or "").strip()
 
     if not usuario or not clave:
         return jsonify({"error": "Credenciales inválidas"}), 403
 
     if usuario not in USUARIOS or USUARIOS[usuario] != clave:
+        # Track failed attempt
+        with LOGIN_ATTEMPTS_LOCK:
+            LOGIN_ATTEMPTS.setdefault(ip, []).append(now)
+        logger.warning(f"Login fallido para usuario '{usuario}' desde IP: {ip}")
         return jsonify({"error": "Credenciales inválidas"}), 403
 
+    # Reset attempts on successful login and remove empty IPs
+    with LOGIN_ATTEMPTS_LOCK:
+        LOGIN_ATTEMPTS[ip] = []
+        # Clean up empty IPs to prevent memory growth
+        for ip_key in list(LOGIN_ATTEMPTS.keys()):
+            if not LOGIN_ATTEMPTS[ip_key]:
+                del LOGIN_ATTEMPTS[ip_key]
+    
     token = generar_token_local(usuario)
+
     return jsonify({
         "token": token,
         "access_token": token,
         "token_type": "Bearer",
         "expires_in": 3600
     }), 200
-
 
 @app.route("/activar-reporte", methods=["POST"])
 @requiere_token
@@ -1278,6 +1551,9 @@ def listar_reportes():
     limit = request.args.get("limit", default=100, type=int)
     offset = request.args.get("offset", default=0, type=int)
     estatus = request.args.get("estatus", default=None, type=str)
+    
+    # Enforce max limit of 500
+    limit = min(limit, 500)
 
     with obtener_conexion_local() as conn:
         if estatus:
@@ -1329,6 +1605,9 @@ def listar_coincidencias():
     limit = request.args.get("limit", default=100, type=int)
     offset = request.args.get("offset", default=0, type=int)
     fase = request.args.get("fase", default=None, type=str)
+    
+    # Enforce max limit of 500
+    limit = min(limit, 500)
 
     with obtener_conexion_local() as conn:
         if fase:
@@ -1369,6 +1648,7 @@ def obtener_coincidencias_por_reporte(reporte_id):
             FROM coincidencias
             WHERE reporte_id = ?
             ORDER BY fecha_envio DESC
+            LIMIT 500
             """,
             (reporte_id,)
         ).fetchall()
@@ -1387,6 +1667,9 @@ def listar_auditoria():
     offset = request.args.get("offset", default=0, type=int)
     evento = request.args.get("evento", default=None, type=str)
     referencia_id = request.args.get("referencia_id", default=None, type=str)
+    
+    # Enforce max limit of 500
+    limit = min(limit, 500)
 
     query = "SELECT * FROM auditoria"
     params = []
@@ -1421,7 +1704,6 @@ def listar_auditoria():
 def metodo_no_permitido(_):
     return jsonify({"error": "Method Not Allowed"}), 405
 
-
 @app.errorhandler(500)
 def error_interno(_):
     return jsonify({"error": "Error interno del servidor"}), 500
@@ -1431,36 +1713,71 @@ def error_interno(_):
 # =========================================================
 @app.before_request
 def log_request():
+    # Get real IP from X-Forwarded-For header if behind proxy
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    if ip and "," in ip:
+        ip = ip.split(",")[0].strip()  # Take first IP in chain
+    
+    # Log technical request details (method, path, remote_addr)
+    logger.info(f"[HTTP] {request.method} {request.path} from {ip}")
+    
     try:
         data = request.get_json(silent=True)
     except Exception:
         data = None
 
-    if request.path == "/login" and isinstance(data, dict):
+    if isinstance(data, dict):
         data_log = dict(data)
-        if "clave" in data_log:
-            data_log["clave"] = "***"
-    else:
-        data_log = data
-
-    logger.info(f"{request.remote_addr} {request.method} {request.path} - Body: {data_log}")
+        # Filter sensitive fields for compliance with data protection regulations
+        SENSITIVE_FIELDS = ["curp", "nombre", "primer_apellido", "segundo_apellido", "correo", "telefono", "direccion", "calle", "numero", "colonia", "codigo_postal", "municipio_o_alcaldia", "entidad_federativa", "clave", "password"]
+        for field in SENSITIVE_FIELDS:
+            if field in data_log:
+                data_log[field] = "***"
+        # Log business logic data separately with size limit
+        data_str = json.dumps(data_log, ensure_ascii=False)
+        if len(data_str) > 1000:
+            data_str = data_str[:1000] + "... (truncated)"
+        logger.info(f"[DATA] Request body (filtered): {data_str}")
+    elif data:
+        data_str = str(data)
+        if len(data_str) > 1000:
+            data_str = data_str[:1000] + "... (truncated)"
+        logger.info(f"[DATA] Request body: {data_str}")
 
 # =========================================================
 # WORKER FASE 3
 # =========================================================
 def worker_fase3():
     logger.info("Hilo de fase 3 iniciado")
+    cleanup_counter = 0
     while not PHASE3_STOP_EVENT.is_set():
         try:
             reportes = obtener_reportes_fase3_activos()
             for reporte in reportes:
-                ejecutar_fase3_para_reporte(reporte)
+                if PHASE3_STOP_EVENT.is_set():
+                    break
+                try:
+                    ejecutar_fase3_para_reporte(reporte)
+                except Exception as inner_e:
+                    logger.error(f"Error procesando reporte {reporte.get('id', 'unknown')}: {inner_e}")
+            
+            # Run DB cleanup every 10 cycles (approximately every hour with default interval)
+            cleanup_counter += 1
+            if cleanup_counter >= 10:
+                try:
+                    limpiar_db_antigua()
+                except Exception as cleanup_e:
+                    logger.error(f"Error en limpieza DB: {cleanup_e}")
+                cleanup_counter = 0
+                
         except Exception as e:
-            logger.error(f"Error en worker fase 3: {e}")
+            import traceback
+            logger.error(f"Error en worker fase 3: {e}\n{traceback.format_exc()}")
 
+        # Wait with timeout to allow responsive shutdown
         PHASE3_STOP_EVENT.wait(PHASE3_INTERVAL_SECONDS)
 
-    logger.info("Hilo de fase 3 detenido")
+    logger.info("Hilo de fase 3 detenido limpiamente")
 
 
 def iniciar_worker_fase3():
@@ -1473,6 +1790,7 @@ def iniciar_worker_fase3():
 
     PHASE3_THREAD = threading.Thread(target=worker_fase3, daemon=True)
     PHASE3_THREAD.start()
+    logger.info("Worker fase 3 iniciado en hilo separado")
 
 # =========================================================
 # INIT
@@ -1484,5 +1802,5 @@ iniciar_worker_fase3()
 # LOCAL
 # =========================================================
 if __name__ == "__main__":
-    logger.info(f"Server listo en http://localhost:{PORT}")
-    app.run(host="localhost", port=PORT)
+    logger.info(f"Server listo en http://0.0.0.0:{PORT}")
+    serve(app, host="0.0.0.0", port=PORT)
