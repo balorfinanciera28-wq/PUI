@@ -22,3 +22,5 @@ config.enc
 # IDE
 .vscode/
 .idea/
+
+config.enc
