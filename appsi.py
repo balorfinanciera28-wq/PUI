@@ -150,6 +150,17 @@ app = Flask(__name__)
 # Limit request size to 1MB to prevent oversized payloads
 app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024
 
+# Security headers for OWASP ZAP compliance
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Content-Security-Policy'] = "default-src 'none'; frame-ancestors 'none';"
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    return response
+
 # =========================================================
 # MAPEO CURP -> LUGAR_NACIMIENTO
 # =========================================================
