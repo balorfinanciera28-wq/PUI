@@ -11,15 +11,19 @@ import threading
 import hashlib
 import signal
 import re
+import secrets
+import uuid
+from urllib.parse import urlparse
 from datetime import datetime, timedelta
 from functools import wraps
 from logging.handlers import RotatingFileHandler
 
-import jwt
+import jwt 
 import pyodbc
 import requests
 from cryptography.fernet import Fernet, InvalidToken
 from flask import Flask, request, jsonify, g
+from werkzeug.middleware.proxy_fix import ProxyFix
 from waitress import serve
 
 # Enable pyodbc connection pooling
@@ -56,18 +60,57 @@ CONFIG = cargar_configuracion()
 # =========================================================
 # ENV
 # =========================================================
+def parse_bool(value, default=False):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return value != 0
+    value = str(value).strip().lower()
+    if value in ("1", "true", "yes", "si", "on"):
+        return True
+    if value in ("0", "false", "no", "off"):
+        return False
+    return default
+
+def parse_yes_no_config(value, default="yes"):
+    if value is None:
+        return default
+    value = str(value).strip().lower()
+    if value in ("yes", "no"):
+        return value
+    if value in ("1", "true", "on", "si"):
+        return "yes"
+    if value in ("0", "false", "off"):
+        return "no"
+    return default
+
+
 JWT_SECRET = os.getenv("JWT_SECRET")
 APP_USER = os.getenv("APP_USER")
 APP_PASSWORD = os.getenv("APP_PASSWORD")
+APP_PASSWORD_HASH = os.getenv("APP_PASSWORD_HASH")
+AUTH_SALT = os.getenv("AUTH_SALT", "")
+TRUST_PROXY_HEADERS = parse_bool(os.getenv("TRUST_PROXY_HEADERS", "false"), False)
+TRUSTED_PROXY_COUNT = max(0, int(os.getenv("TRUSTED_PROXY_COUNT", "1") or "1"))
+ALLOW_INSECURE_PUI_URL = parse_bool(os.getenv("ALLOW_INSECURE_PUI_URL", "false"), False)
+HEALTH_REQUIRE_TOKEN = parse_bool(os.getenv("HEALTH_REQUIRE_TOKEN", "false"), False)
 
 if not JWT_SECRET:
     raise ValueError("Falta JWT_SECRET")
 
-if not APP_USER or not APP_PASSWORD:
-    raise ValueError("Faltan credenciales APP_USER / APP_PASSWORD")
+if len(JWT_SECRET) < 32:
+    raise ValueError("JWT_SECRET debe tener al menos 32 caracteres")
+
+if not APP_USER or (not APP_PASSWORD and not APP_PASSWORD_HASH):
+    raise ValueError("Faltan credenciales APP_USER / APP_PASSWORD o APP_PASSWORD_HASH")
+
+if APP_PASSWORD_HASH and not AUTH_SALT:
+    raise ValueError("AUTH_SALT es obligatorio cuando se usa APP_PASSWORD_HASH")
 
 USUARIOS = {
-    APP_USER: APP_PASSWORD
+    APP_USER: APP_PASSWORD_HASH or APP_PASSWORD
 }
 
 # =========================================================
@@ -90,7 +133,15 @@ LOCAL_DB_PATH = CONFIG.get("LOCAL_DB_PATH", "pui_local.db")
 REQUEST_TIMEOUT = int(CONFIG.get("REQUEST_TIMEOUT", 15))
 
 PHASE3_INTERVAL_SECONDS = int(CONFIG.get("PHASE3_INTERVAL_SECONDS", 300))
-ENABLE_PHASE3_THREAD = CONFIG.get("ENABLE_PHASE3_THREAD", True)
+ENABLE_PHASE3_THREAD = parse_bool(CONFIG.get("ENABLE_PHASE3_THREAD", True), True)
+SQL_ENCRYPT = parse_yes_no_config(CONFIG.get("SQL_ENCRYPT", "yes"), "yes")
+SQL_TRUST_SERVER_CERTIFICATE = parse_yes_no_config(CONFIG.get("SQL_TRUST_SERVER_CERTIFICATE", "no"), "no")
+VERIFY_TLS = parse_bool(CONFIG.get("VERIFY_TLS", True), True)
+STORE_FULL_COINCIDENCE_PAYLOADS = parse_bool(CONFIG.get("STORE_FULL_COINCIDENCE_PAYLOADS", True), True)
+MAX_AUDIT_QUERY_LENGTH = 250
+GENERIC_DB_ERROR_MESSAGE = "Error interno al consultar datos"
+UUID_REGEX = re.compile(r"^[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[1-5A-Fa-f][A-Fa-f0-9]{3}-[89ABab][A-Fa-f0-9]{3}-[A-Fa-f0-9]{12}$")
+SAFE_ID_REGEX = re.compile(r"^[A-Za-z0-9._:-]{36,75}$")
 
 # CACHE TOKEN
 PUI_TOKEN_CACHE = {
@@ -106,6 +157,167 @@ LOGIN_ATTEMPTS_LOCK = threading.Lock()
 # THREAD
 PHASE3_THREAD = None
 PHASE3_STOP_EVENT = threading.Event()
+
+
+def _is_local_host(hostname):
+    return hostname in {"localhost", "127.0.0.1", "::1"}
+
+def validar_pui_base_url(url):
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("PUI_BASE_URL debe iniciar con http:// o https://")
+    if parsed.scheme != "https" and not (ALLOW_INSECURE_PUI_URL and _is_local_host(parsed.hostname or "")):
+        raise ValueError("PUI_BASE_URL debe usar HTTPS en producción")
+    if not parsed.netloc:
+        raise ValueError("PUI_BASE_URL inválida")
+    return url.rstrip("/")
+
+PUI_BASE_URL = validar_pui_base_url(PUI_BASE_URL)
+
+def sanitizar_valor_sensible(valor):
+    if valor is None:
+        return None
+    if isinstance(valor, str):
+        if len(valor) <= 4:
+            return "***"
+        return valor[:2] + "***" + valor[-2:]
+    return "***"
+
+SENSITIVE_FIELDS = {
+    "curp", "nombre", "primer_apellido", "segundo_apellido", "correo", "telefono",
+    "direccion", "calle", "numero", "colonia", "codigo_postal", "municipio_o_alcaldia",
+    "entidad_federativa", "clave", "password", "token", "access_token", "authorization",
+    "sql_password", "pwd", "jwt_secret", "app_password", "pui_clave"
+}
+
+def sanitizar_para_log(obj, max_len=1000):
+    def _walk(value, parent_key=None):
+        if isinstance(value, dict):
+            return {k: (sanitizar_valor_sensible(v) if str(k).strip().lower() in SENSITIVE_FIELDS else _walk(v, k)) for k, v in value.items()}
+        if isinstance(value, list):
+            return [_walk(v, parent_key) for v in value]
+        if isinstance(value, tuple):
+            return tuple(_walk(v, parent_key) for v in value)
+        if isinstance(value, str):
+            return value if len(value) <= max_len else value[:max_len] + "... (truncated)"
+        return value
+    return _walk(obj)
+
+def obtener_ip_cliente():
+    return request.remote_addr or "unknown"
+
+def verificar_credenciales(usuario, clave):
+    esperado = USUARIOS.get(usuario)
+    if esperado is None or not isinstance(clave, str) or len(clave) > 1024:
+        return False
+    recibido = clave
+    if APP_PASSWORD_HASH:
+        recibido = hashlib.pbkdf2_hmac("sha256", clave.encode("utf-8"), AUTH_SALT.encode("utf-8"), 600000).hex()
+    return secrets.compare_digest(str(esperado), str(recibido))
+
+def validar_fecha_iso(valor, campo):
+    if valor in (None, ""):
+        return None
+    if not isinstance(valor, str):
+        raise ValueError(f"{campo} debe ser string")
+    try:
+        return datetime.strptime(valor[:10], "%Y-%m-%d").strftime("%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError(f"{campo} debe tener formato YYYY-MM-DD") from exc
+
+def validar_correo(valor):
+    if valor in (None, ""):
+        return None
+    valor = str(valor).strip()
+    if len(valor) > 254 or not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", valor):
+        raise ValueError("correo inválido")
+    return valor
+
+def validar_codigo_postal(valor):
+    if valor in (None, ""):
+        return None
+    valor = str(valor).strip()
+    if not re.match(r"^\d{5}$", valor):
+        raise ValueError("codigo_postal inválido")
+    return valor
+
+def limpiar_entero_positivo(valor, default_value=0, max_value=500):
+    try:
+        valor = int(valor)
+    except (TypeError, ValueError):
+        valor = default_value
+    if valor < 0:
+        valor = default_value
+    return min(valor, max_value)
+
+def es_uuid_valido(valor):
+    return isinstance(valor, str) and UUID_REGEX.match(valor.strip()) is not None
+
+def limitar_texto(valor, max_len=255, field_name="valor"):
+    valor = valor_o_none(valor)
+    if valor is None:
+        return None
+    if len(valor) > max_len:
+        raise ValueError(f"{field_name} excede longitud permitida")
+    return valor
+
+def construir_resumen_sql_para_auditoria(query, params):
+    query_limpia = " ".join(str(query).split())
+    if len(query_limpia) > MAX_AUDIT_QUERY_LENGTH:
+        query_limpia = query_limpia[:MAX_AUDIT_QUERY_LENGTH] + "... (truncated)"
+    return {
+        "query_preview": query_limpia,
+        "param_count": len(params or []),
+    }
+
+
+def minimizar_payload_para_almacenamiento(payload, respuesta_pui=None):
+    payload_guardado = payload if STORE_FULL_COINCIDENCE_PAYLOADS else sanitizar_para_log(payload)
+    respuesta_guardada = respuesta_pui
+    if respuesta_pui is not None and not STORE_FULL_COINCIDENCE_PAYLOADS:
+        if isinstance(respuesta_pui, dict):
+            respuesta_guardada = {"status_code": respuesta_pui.get("status_code")}
+        else:
+            respuesta_guardada = {"status_code": None}
+    return payload_guardado, respuesta_guardada
+
+def require_json_request():
+    if request.method in ("POST", "PUT", "PATCH") and not request.is_json:
+        return jsonify({"error": "Content-Type debe ser application/json"}), 415
+    return None
+
+def validar_campos_reporte(data):
+    reporte = {
+        "id": data["id"],
+        "curp": data["curp"],
+        "nombre": limitar_texto(data.get("nombre"), 255, "nombre"),
+        "primer_apellido": limitar_texto(data.get("primer_apellido"), 255, "primer_apellido"),
+        "segundo_apellido": limitar_texto(data.get("segundo_apellido"), 255, "segundo_apellido"),
+        "fecha_nacimiento": validar_fecha_iso(valor_o_none(data.get("fecha_nacimiento")), "fecha_nacimiento"),
+        "fecha_desaparicion": validar_fecha_iso(valor_o_none(data.get("fecha_desaparicion")), "fecha_desaparicion"),
+        "lugar_nacimiento": limitar_texto(valor_o_none(data.get("lugar_nacimiento")) or lugar_nacimiento_desde_curp(data["curp"]), 255, "lugar_nacimiento"),
+        "sexo_asignado": limitar_texto(data.get("sexo_asignado"), 10, "sexo_asignado"),
+        "telefono": limitar_texto(data.get("telefono"), 25, "telefono"),
+        "correo": validar_correo(valor_o_none(data.get("correo"))),
+        "direccion": limitar_texto(data.get("direccion"), 255, "direccion"),
+        "calle": limitar_texto(data.get("calle"), 255, "calle"),
+        "numero": limitar_texto(data.get("numero"), 50, "numero"),
+        "colonia": limitar_texto(data.get("colonia"), 255, "colonia"),
+        "codigo_postal": validar_codigo_postal(valor_o_none(data.get("codigo_postal"))),
+        "municipio_o_alcaldia": limitar_texto(data.get("municipio_o_alcaldia"), 255, "municipio_o_alcaldia"),
+        "entidad_federativa": limitar_texto(data.get("entidad_federativa"), 255, "entidad_federativa"),
+    }
+    if reporte["sexo_asignado"]:
+        sexo = normalizar_texto(reporte["sexo_asignado"])
+        if sexo not in ("H", "M", "X"):
+            raise ValueError("sexo_asignado inválido")
+        reporte["sexo_asignado"] = sexo
+    if reporte["telefono"]:
+        telefono = re.sub(r"\s+", "", reporte["telefono"])
+        if not re.match(r"^[+0-9()\-\s]{7,25}$", reporte["telefono"]):
+            raise ValueError("telefono inválido")
+        reporte["telefono"] = telefono
+    return reporte
 
 # =========================================================
 # LOGGING
@@ -147,6 +359,8 @@ except (AttributeError, ValueError):
 # FLASK
 # =========================================================
 app = Flask(__name__)
+if TRUST_PROXY_HEADERS and TRUSTED_PROXY_COUNT > 0:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=TRUSTED_PROXY_COUNT, x_proto=TRUSTED_PROXY_COUNT, x_host=TRUSTED_PROXY_COUNT)
 # Limit request size to 1MB to prevent oversized payloads
 app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024
 
@@ -154,11 +368,16 @@ app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024
 @app.after_request
 def add_security_headers(response):
     response.headers['X-Content-Type-Options'] = 'nosniff'
-    response.headers['Content-Security-Policy'] = "default-src 'none'; frame-ancestors 'none';"
+    response.headers['Content-Security-Policy'] = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
     response.headers['X-Frame-Options'] = 'DENY'
-    response.headers['X-XSS-Protection'] = '1; mode=block'
-    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    response.headers['X-XSS-Protection'] = '0'
+    if request.is_secure:
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    response.headers['Cache-Control'] = 'no-store'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
+    response.headers['X-Request-ID'] = getattr(g, 'request_id', '')
     return response
 
 # =========================================================
@@ -207,8 +426,16 @@ CURP_ESTADOS = {
 # =========================================================
 # SQLITE LOCAL
 # =========================================================
+def asegurar_permisos_archivo_local():
+    try:
+        db_path = os.path.abspath(LOCAL_DB_PATH)
+        if os.path.exists(db_path) and os.name != "nt":
+            os.chmod(db_path, 0o600)
+    except Exception as e:
+        logger.warning(f"No fue posible ajustar permisos del archivo local: {e}")
+
 def obtener_conexion_local():
-    conn = sqlite3.connect(LOCAL_DB_PATH, timeout=30, check_same_thread=False)
+    conn = sqlite3.connect(LOCAL_DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     # Enable WAL mode for better concurrency and reduced blocking
     conn.execute("PRAGMA journal_mode=WAL;")
@@ -301,6 +528,7 @@ def inicializar_db_local():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_coincidencias_reporte ON coincidencias(reporte_id)")
 
         conn.commit()
+    asegurar_permisos_archivo_local()
 
 
 def guardar_reporte_local(data, usuario_receptor, estatus, fase_actual=None):
@@ -443,6 +671,7 @@ def desmarcar_procesando_fase3(reporte_id):
 
 
 def guardar_coincidencia_local(reporte_id, fase_busqueda, payload, respuesta_pui, hash_unico):
+    payload_guardado, respuesta_guardada = minimizar_payload_para_almacenamiento(payload, respuesta_pui)
     with obtener_conexion_local() as conn:
         conn.execute(
             """
@@ -452,8 +681,8 @@ def guardar_coincidencia_local(reporte_id, fase_busqueda, payload, respuesta_pui
             (
                 reporte_id,
                 fase_busqueda,
-                json.dumps(payload, ensure_ascii=False),
-                json.dumps(respuesta_pui, ensure_ascii=False),
+                json.dumps(payload_guardado, ensure_ascii=False),
+                json.dumps(respuesta_guardada, ensure_ascii=False),
                 datetime.utcnow().isoformat(),
                 hash_unico
             )
@@ -478,7 +707,7 @@ def registrar_auditoria(evento, referencia_id, detalle):
                 INSERT INTO auditoria (evento, referencia_id, detalle, fecha_evento)
                 VALUES (?, ?, ?, ?)
                 """,
-                (evento, referencia_id, detalle, datetime.utcnow().isoformat())
+                (evento, referencia_id, json.dumps(sanitizar_para_log(detalle), ensure_ascii=False) if not isinstance(detalle, str) else str(sanitizar_para_log(detalle)), datetime.utcnow().isoformat())
             )
             conn.commit()
     except Exception as e:
@@ -652,9 +881,12 @@ def generar_hash_coincidencia(reporte_id, fase_busqueda, detalle):
 # VALIDACIONES
 # =========================================================
 def validar_json(campos_obligatorios):
+    if not request.is_json:
+        return None, "Content-Type debe ser application/json"
+
     data = request.get_json(silent=True)
 
-    if not data:
+    if data is None:
         return None, "JSON no enviado"
 
     if not isinstance(data, dict):
@@ -669,7 +901,6 @@ def validar_json(campos_obligatorios):
             return None, f"Campo obligatorio vacío: {campo}"
 
     return data, None
-
 
 def validar_curp(curp):
     if not isinstance(curp, str):
@@ -688,7 +919,11 @@ def validar_id_busqueda(id_busqueda):
     id_busqueda = id_busqueda.strip()
     if len(id_busqueda) < 36 or len(id_busqueda) > 75:
         return False, "ID debe tener entre 36 y 75 caracteres"
-    return True, id_busqueda
+    if es_uuid_valido(id_busqueda):
+        return True, id_busqueda
+    if SAFE_ID_REGEX.match(id_busqueda):
+        return True, id_busqueda
+    return False, "ID contiene caracteres inválidos"
 
 # =========================================================
 # SQL SERVER
@@ -700,7 +935,8 @@ def obtener_conexion_sql():
         f"DATABASE={SQL_DATABASE};"
         f"UID={SQL_USER};"
         f"PWD={SQL_PASSWORD};"
-        "TrustServerCertificate=yes;"
+        f"Encrypt={SQL_ENCRYPT};"
+        f"TrustServerCertificate={SQL_TRUST_SERVER_CERTIFICATE};"
     )
     max_retries = 3
     for intento in range(max_retries):
@@ -750,7 +986,8 @@ def requiere_token(f):
                 JWT_SECRET,
                 algorithms=["HS256"],
                 audience="pui-api",
-                issuer="pui-webhook"
+                issuer="pui-webhook",
+                options={"require": ["exp", "iat", "nbf", "iss", "aud", "institucion_id"]}
             )
             g.usuario_id = decoded["institucion_id"]
 
@@ -797,7 +1034,9 @@ def obtener_token_pui():
                     url,
                     json=payload,
                     headers={"Content-Type": "application/json; charset=utf-8"},
-                    timeout=(5, REQUEST_TIMEOUT)
+                    timeout=(5, REQUEST_TIMEOUT),
+                    verify=VERIFY_TLS,
+                    allow_redirects=False
                 )
                 r.raise_for_status()
                 
@@ -877,7 +1116,7 @@ def consultar_fase1_datos_basicos(curp, nombre=None, primer_apellido=None, segun
     registrar_auditoria(
         "CONSULTA_SQL_FASE1",
         curp,
-        json.dumps({"query": query, "params": params}, ensure_ascii=False)
+        construir_resumen_sql_para_auditoria(query, params)
     )
 
     try:
@@ -920,7 +1159,7 @@ def consultar_fase1_datos_basicos(curp, nombre=None, primer_apellido=None, segun
 
     except Exception as e:
         logger.error(f"Error SQL fase 1: {e}")
-        return {"encontrado": False, "fase": "1", "detalle": None, "error_sql": str(e)}
+        return {"encontrado": False, "fase": "1", "detalle": None, "error_sql": GENERIC_DB_ERROR_MESSAGE}
 
 # =========================================================
 # FASE 2
@@ -986,7 +1225,7 @@ def consultar_fase2_historica(reporte):
     registrar_auditoria(
         "CONSULTA_SQL_FASE2",
         reporte["id"],
-        json.dumps({"query": query, "params": params}, ensure_ascii=False)
+        construir_resumen_sql_para_auditoria(query, params)
     )
 
     try:
@@ -1032,7 +1271,7 @@ def consultar_fase2_historica(reporte):
 
     except Exception as e:
         logger.error(f"Error SQL fase 2: {e}")
-        return {"ejecutada": True, "coincidencias": [], "mensaje": str(e)}
+        return {"ejecutada": True, "coincidencias": [], "mensaje": GENERIC_DB_ERROR_MESSAGE}
 
 # =========================================================
 # FASE 3
@@ -1103,7 +1342,7 @@ def consultar_fase3_continua(reporte):
     registrar_auditoria(
         "CONSULTA_SQL_FASE3",
         reporte["id"],
-        json.dumps({"query": query, "params": [str(p) if isinstance(p, datetime) else p for p in params]}, ensure_ascii=False)
+        construir_resumen_sql_para_auditoria(query, params)
     )
 
     try:
@@ -1244,13 +1483,13 @@ def notificar_coincidencia_pui(reporte, detalle, fase_busqueda):
 
     for intento in range(3):
         try:
-            r = requests.post(url, json=payload, headers=headers, timeout=(5, REQUEST_TIMEOUT))
+            r = requests.post(url, json=payload, headers=headers, timeout=(5, REQUEST_TIMEOUT), verify=VERIFY_TLS, allow_redirects=False)
             respuesta = {"status_code": r.status_code, "body": r.text}
 
             registrar_auditoria(
                 "ENVIO_NOTIFICAR_COINCIDENCIA",
                 reporte["id"],
-                json.dumps({"payload": payload, "respuesta": respuesta}, ensure_ascii=False)
+                {"payload": payload, "respuesta": {"status_code": respuesta.get("status_code")}}
             )
             if r.status_code == 200:
                 guardar_coincidencia_local(reporte["id"], str(fase_busqueda), payload, respuesta, hash_unico)
@@ -1276,12 +1515,12 @@ def enviar_busqueda_finalizada_pui(reporte_id):
         "Content-Type": "application/json; charset=utf-8"
     }
 
-    r = requests.post(url, json=payload, headers=headers, timeout=(5, REQUEST_TIMEOUT))
+    r = requests.post(url, json=payload, headers=headers, timeout=(5, REQUEST_TIMEOUT), verify=VERIFY_TLS, allow_redirects=False)
 
     registrar_auditoria(
         "ENVIO_BUSQUEDA_FINALIZADA",
         reporte_id,
-        json.dumps({"status_code": r.status_code, "body": r.text, "payload": payload}, ensure_ascii=False)
+        {"status_code": r.status_code, "payload": payload}
     )
 
     return r.status_code == 200, r.text
@@ -1362,14 +1601,29 @@ def ejecutar_fase3_para_reporte(reporte):
 # =========================================================
 @app.route("/health", methods=["GET"])
 def health():
+    if HEALTH_REQUIRE_TOKEN:
+        auth = request.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            return jsonify({"error": "No autorizado"}), 401
+        try:
+            token = auth.replace("Bearer ", "", 1).strip()
+            jwt.decode(
+                token,
+                JWT_SECRET,
+                algorithms=["HS256"],
+                audience="pui-api",
+                issuer="pui-webhook",
+                options={"require": ["exp", "iat", "nbf", "iss", "aud", "institucion_id"]}
+            )
+        except Exception:
+            return jsonify({"error": "No autorizado"}), 401
     return jsonify({"status": "ok"}), 200
 
 @app.route("/login", methods=["POST"])
 def login():
-    # Get real IP from X-Forwarded-For header if behind proxy
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
-    if ip and "," in ip:
-        ip = ip.split(",")[0].strip()  # Take first IP in chain
+    if not request.is_json:
+        return jsonify({"error": "Content-Type debe ser application/json"}), 415
+    ip = obtener_ip_cliente()
     
     now = datetime.utcnow()
     
@@ -1380,11 +1634,12 @@ def login():
         
         # Periodic cleanup of old IPs to prevent memory growth
         if len(LOGIN_ATTEMPTS) > 10000:
-            LOGIN_ATTEMPTS.clear()
-            LOGIN_ATTEMPTS.update({
-                ip: times for ip, times in LOGIN_ATTEMPTS.items()
+            cleaned_attempts = {
+                ip_key: times for ip_key, times in LOGIN_ATTEMPTS.items()
                 if any(t > cutoff for t in times)
-            })
+            }
+            LOGIN_ATTEMPTS.clear()
+            LOGIN_ATTEMPTS.update(cleaned_attempts)
         
         # Check if rate limit exceeded
         if len(LOGIN_ATTEMPTS.get(ip, [])) >= 5:
@@ -1402,11 +1657,11 @@ def login():
     if not usuario or not clave:
         return jsonify({"error": "Credenciales inválidas"}), 403
 
-    if usuario not in USUARIOS or USUARIOS[usuario] != clave:
+    if usuario not in USUARIOS or not verificar_credenciales(usuario, clave):
         # Track failed attempt
         with LOGIN_ATTEMPTS_LOCK:
             LOGIN_ATTEMPTS.setdefault(ip, []).append(now)
-        logger.warning(f"Login fallido para usuario '{usuario}' desde IP: {ip}")
+        logger.warning(f"Login fallido para usuario '{sanitizar_valor_sensible(usuario)}' desde IP: {ip}")
         return jsonify({"error": "Credenciales inválidas"}), 403
 
     # Reset attempts on successful login and remove empty IPs
@@ -1441,29 +1696,13 @@ def activar_reporte():
     if not ok_curp:
         return jsonify({"error": curp_validada}), 400
 
-    reporte = {
-        "id": id_validado,
-        "curp": curp_validada,
-        "nombre": valor_o_none(data.get("nombre")),
-        "primer_apellido": valor_o_none(data.get("primer_apellido")),
-        "segundo_apellido": valor_o_none(data.get("segundo_apellido")),
-        "fecha_nacimiento": valor_o_none(data.get("fecha_nacimiento")),
-        "fecha_desaparicion": valor_o_none(data.get("fecha_desaparicion")),
-        "lugar_nacimiento": valor_o_none(data.get("lugar_nacimiento")) or lugar_nacimiento_desde_curp(curp_validada),
-        "sexo_asignado": valor_o_none(data.get("sexo_asignado")),
-        "telefono": valor_o_none(data.get("telefono")),
-        "correo": valor_o_none(data.get("correo")),
-        "direccion": valor_o_none(data.get("direccion")),
-        "calle": valor_o_none(data.get("calle")),
-        "numero": valor_o_none(data.get("numero")),
-        "colonia": valor_o_none(data.get("colonia")),
-        "codigo_postal": valor_o_none(data.get("codigo_postal")),
-        "municipio_o_alcaldia": valor_o_none(data.get("municipio_o_alcaldia")),
-        "entidad_federativa": valor_o_none(data.get("entidad_federativa")),
-    }
+    try:
+        reporte = validar_campos_reporte({**data, "id": id_validado, "curp": curp_validada})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     guardar_reporte_local(reporte, g.usuario_id, "RECIBIDO", "1")
-    registrar_auditoria("ACTIVAR_REPORTE_RECIBIDO", reporte["id"], json.dumps(reporte, ensure_ascii=False))
+    registrar_auditoria("ACTIVAR_REPORTE_RECIBIDO", reporte["id"], sanitizar_para_log(reporte))
 
     ejecutar_fase1(reporte)
     ejecutar_fase2(reporte)
@@ -1488,29 +1727,13 @@ def activar_reporte_prueba():
     if not ok_curp:
         return jsonify({"error": curp_validada}), 400
 
-    reporte = {
-        "id": id_validado,
-        "curp": curp_validada,
-        "nombre": valor_o_none(data.get("nombre")),
-        "primer_apellido": valor_o_none(data.get("primer_apellido")),
-        "segundo_apellido": valor_o_none(data.get("segundo_apellido")),
-        "fecha_nacimiento": valor_o_none(data.get("fecha_nacimiento")),
-        "fecha_desaparicion": valor_o_none(data.get("fecha_desaparicion")),
-        "lugar_nacimiento": valor_o_none(data.get("lugar_nacimiento")) or lugar_nacimiento_desde_curp(curp_validada),
-        "sexo_asignado": valor_o_none(data.get("sexo_asignado")),
-        "telefono": valor_o_none(data.get("telefono")),
-        "correo": valor_o_none(data.get("correo")),
-        "direccion": valor_o_none(data.get("direccion")),
-        "calle": valor_o_none(data.get("calle")),
-        "numero": valor_o_none(data.get("numero")),
-        "colonia": valor_o_none(data.get("colonia")),
-        "codigo_postal": valor_o_none(data.get("codigo_postal")),
-        "municipio_o_alcaldia": valor_o_none(data.get("municipio_o_alcaldia")),
-        "entidad_federativa": valor_o_none(data.get("entidad_federativa")),
-    }
+    try:
+        reporte = validar_campos_reporte({**data, "id": id_validado, "curp": curp_validada})
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
 
     guardar_reporte_local(reporte, g.usuario_id, "RECIBIDO_PRUEBA", "1")
-    registrar_auditoria("ACTIVAR_REPORTE_PRUEBA_RECIBIDO", reporte["id"], json.dumps(reporte, ensure_ascii=False))
+    registrar_auditoria("ACTIVAR_REPORTE_PRUEBA_RECIBIDO", reporte["id"], sanitizar_para_log(reporte))
 
     resultado_f1 = consultar_fase1_datos_basicos(
         curp=reporte["curp"],
@@ -1559,8 +1782,8 @@ def desactivar_reporte():
 @app.route("/reportes", methods=["GET"])
 @requiere_token
 def listar_reportes():
-    limit = request.args.get("limit", default=100, type=int)
-    offset = request.args.get("offset", default=0, type=int)
+    limit = limpiar_entero_positivo(request.args.get("limit", default=100, type=int), default_value=100, max_value=500)
+    offset = limpiar_entero_positivo(request.args.get("offset", default=0, type=int), default_value=0, max_value=1000000)
     estatus = request.args.get("estatus", default=None, type=str)
     
     # Enforce max limit of 500
@@ -1598,6 +1821,9 @@ def listar_reportes():
 @app.route("/reportes/<reporte_id>", methods=["GET"])
 @requiere_token
 def obtener_reporte(reporte_id):
+    ok_id, reporte_id = validar_id_busqueda(reporte_id)
+    if not ok_id:
+        return jsonify({"error": reporte_id}), 400
     with obtener_conexion_local() as conn:
         row = conn.execute(
             "SELECT * FROM reportes WHERE id = ?",
@@ -1613,8 +1839,8 @@ def obtener_reporte(reporte_id):
 @app.route("/coincidencias", methods=["GET"])
 @requiere_token
 def listar_coincidencias():
-    limit = request.args.get("limit", default=100, type=int)
-    offset = request.args.get("offset", default=0, type=int)
+    limit = limpiar_entero_positivo(request.args.get("limit", default=100, type=int), default_value=100, max_value=500)
+    offset = limpiar_entero_positivo(request.args.get("offset", default=0, type=int), default_value=0, max_value=1000000)
     fase = request.args.get("fase", default=None, type=str)
     
     # Enforce max limit of 500
@@ -1652,6 +1878,9 @@ def listar_coincidencias():
 @app.route("/coincidencias/<reporte_id>", methods=["GET"])
 @requiere_token
 def obtener_coincidencias_por_reporte(reporte_id):
+    ok_id, reporte_id = validar_id_busqueda(reporte_id)
+    if not ok_id:
+        return jsonify({"error": reporte_id}), 400
     with obtener_conexion_local() as conn:
         rows = conn.execute(
             """
@@ -1674,8 +1903,8 @@ def obtener_coincidencias_por_reporte(reporte_id):
 @app.route("/auditoria", methods=["GET"])
 @requiere_token
 def listar_auditoria():
-    limit = request.args.get("limit", default=200, type=int)
-    offset = request.args.get("offset", default=0, type=int)
+    limit = limpiar_entero_positivo(request.args.get("limit", default=200, type=int), default_value=200, max_value=500)
+    offset = limpiar_entero_positivo(request.args.get("offset", default=0, type=int), default_value=0, max_value=1000000)
     evento = request.args.get("evento", default=None, type=str)
     referencia_id = request.args.get("referencia_id", default=None, type=str)
     
@@ -1711,6 +1940,22 @@ def listar_auditoria():
 # =========================================================
 # ERRORES
 # =========================================================
+@app.errorhandler(400)
+def solicitud_invalida(_):
+    return jsonify({"error": "Solicitud inválida"}), 400
+
+@app.errorhandler(404)
+def no_encontrado(_):
+    return jsonify({"error": "No encontrado"}), 404
+
+@app.errorhandler(413)
+def payload_demasiado_grande(_):
+    return jsonify({"error": "Payload demasiado grande"}), 413
+
+@app.errorhandler(415)
+def media_type_invalido(_):
+    return jsonify({"error": "Content-Type debe ser application/json"}), 415
+
 @app.errorhandler(405)
 def metodo_no_permitido(_):
     return jsonify({"error": "Method Not Allowed"}), 405
@@ -1720,31 +1965,32 @@ def error_interno(_):
     return jsonify({"error": "Error interno del servidor"}), 500
 
 # =========================================================
+# PREVALIDACIÓN REQUEST
+# =========================================================
+@app.before_request
+def enforce_json_content_type():
+    return require_json_request()
+
+# =========================================================
 # LOG REQUEST
 # =========================================================
 @app.before_request
 def log_request():
-    # Get real IP from X-Forwarded-For header if behind proxy
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
-    if ip and "," in ip:
-        ip = ip.split(",")[0].strip()  # Take first IP in chain
+    g.request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    ip = obtener_ip_cliente()
+    logger.info(f"[HTTP] {request.method} {request.path} from {ip} request_id={g.request_id}")
     
-    # Log technical request details (method, path, remote_addr)
-    logger.info(f"[HTTP] {request.method} {request.path} from {ip}")
-    
-    try:
-        data = request.get_json(silent=True)
-    except Exception:
-        data = None
+    data = None
+    if request.is_json:
+        try:
+            data = request.get_json(silent=True)
+        except Exception:
+            data = None
 
     if isinstance(data, dict):
         data_log = dict(data)
         # Filter sensitive fields for compliance with data protection regulations
-        SENSITIVE_FIELDS = ["curp", "nombre", "primer_apellido", "segundo_apellido", "correo", "telefono", "direccion", "calle", "numero", "colonia", "codigo_postal", "municipio_o_alcaldia", "entidad_federativa", "clave", "password"]
-        for field in SENSITIVE_FIELDS:
-            if field in data_log:
-                data_log[field] = "***"
-        # Log business logic data separately with size limit
+        data_log = sanitizar_para_log(data_log)
         data_str = json.dumps(data_log, ensure_ascii=False)
         if len(data_str) > 1000:
             data_str = data_str[:1000] + "... (truncated)"
