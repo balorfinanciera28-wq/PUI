@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions
+    xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.4.xsd"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.4.xsd https://dependency-check.github.io/DependencyCheck/dependency-suppression.1.4.xsd">
+
+    <suppress>
+        <notes><![CDATA[
+                Supresión de falso positivo:
+                CVE-2025-45770 corresponde a la librería PHP lcobucci/jwt/jwt 5.4.3
+                y no a PyJWT 2.12.1 de Python. Se trata de una confusión por nombre.
+                ]]>
+        </notes>
+        <packageUrl regex="true">^pkg:pypi/pyjwt@.*$</packageUrl>
+        <cve>CVE-2025-45770</cve>
+    </suppress>
+
+</suppressions>
