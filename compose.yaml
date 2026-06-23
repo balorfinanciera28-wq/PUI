@@ -1,0 +1,32 @@
+services:
+  webhook:
+    isolation: hyperv
+    build:
+      context: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      APP_CONFIG_PATH: C:\data\config.enc
+      LOCAL_DB_PATH: C:\data\pui_local.db
+    volumes:
+      - .:C:\data
+    expose:
+      - "5000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests, sys; sys.exit(0 if requests.get('http://127.0.0.1:5000/health').status_code in (200, 401) else 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  cloudflared:
+    isolation: hyperv
+    build:
+      context: C:/cloudflared
+    restart: unless-stopped
+    depends_on:
+      - webhook
+    volumes:
+      - C:/cloudflared:C:\config:ro
+      - C:/Users/RAFAEL/.cloudflared:C:\credentials:ro

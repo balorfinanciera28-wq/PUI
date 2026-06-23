@@ -129,7 +129,7 @@ PUI_BASE_URL = CONFIG["PUI_BASE_URL"].rstrip("/")  # <-- IMPORTANTE
 PUI_INSTITUCION_ID = CONFIG["PUI_INSTITUCION_ID"]
 PUI_CLAVE = CONFIG["PUI_CLAVE"]
 
-LOCAL_DB_PATH = CONFIG.get("LOCAL_DB_PATH", "pui_local.db")
+LOCAL_DB_PATH = os.getenv("LOCAL_DB_PATH", CONFIG.get("LOCAL_DB_PATH", "pui_local.db"))
 REQUEST_TIMEOUT = int(CONFIG.get("REQUEST_TIMEOUT", 15))
 
 PHASE3_INTERVAL_SECONDS = int(CONFIG.get("PHASE3_INTERVAL_SECONDS", 300))
@@ -1989,6 +1989,7 @@ def log_request():
 
     if isinstance(data, dict):
         data_log = dict(data)
+
         # Filter sensitive fields for compliance with data protection regulations
         data_log = sanitizar_para_log(data_log)
         data_str = json.dumps(data_log, ensure_ascii=False)
